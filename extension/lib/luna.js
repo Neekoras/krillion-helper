@@ -4,6 +4,7 @@
 const TIMEOUT_MS = 4000;
 const MIN_FIT = 0.1;
 const MIN_SURVIVAL_FIT = 0.5;
+const ENOUGH_OBSCURITY = 2; // "Only enthusiasts would think of this answer"
 
 const OBSCURITY_LEVELS = [
   { label: "Almost everyone would think of this answer" },
@@ -36,6 +37,8 @@ export function buildRequest(prompt, candidates) {
 
 // The fit check only removes confident misses. Testing showed that ranking by it
 // pushes suggestions toward mainstream answers that score lower.
+// Deep Cut is most of a typical answer list, so obscurity stops helping once only
+// enthusiasts would think of an answer. Past that, the chance of being listed decides.
 export function applyGrades(candidates, answers) {
   const byName = new Map(answers.map((a) => [a.name, a]));
   return candidates
@@ -43,7 +46,7 @@ export function applyGrades(candidates, answers) {
       const fit = byName.get(`fits_${i}`);
       const listed = byName.get(`listed_${i}`)?.probability ?? 0;
       const obscure = byName.get(`obscure_${i}`)?.score ?? 0;
-      return { name, fits: fit?.probability ?? 0, rank: obscure * listed ** 2, i };
+      return { name, fits: fit?.probability ?? 0, rank: Math.min(obscure, ENOUGH_OBSCURITY) * listed ** 2, i };
     })
     .filter((c) => c.fits >= MIN_FIT)
     .sort((a, b) => b.rank - a.rank || a.i - b.i)

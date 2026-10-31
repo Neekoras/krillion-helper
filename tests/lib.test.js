@@ -75,6 +75,14 @@ test("applyGrades removes only confident misses and doesn't rank by fit", () => 
   assert.deepEqual(applyGrades(rows.map(([n]) => n), grades(rows)), ["Comoros", "France"]);
 });
 
+test("applyGrades stops rewarding obscurity once only enthusiasts know an answer", () => {
+  const rows = [
+    ["Almost unknown", 0.7, 3, 0.9],
+    ["Enthusiast pick", 0.9, 2, 0.9],
+  ];
+  assert.deepEqual(applyGrades(rows.map(([n]) => n), grades(rows)), ["Enthusiast pick", "Almost unknown"]);
+});
+
 test("rankForSurvival puts safe answers ahead of rare risky ones", () => {
   const rows = [
     ["Invented tea", 0.3, 3, 0.9],

@@ -27,6 +27,12 @@ Learned by playing Unlimited dive 1:
 - `GET /api/unlimited/<n>/reveal` runs after a dive and returns every accepted answer with its tier.
 - Each prompt in that dive had exactly one `krillion` answer, chosen by hand with a fun fact attached.
 
+Learned from the reveal of one finished Unlimited dive (7 prompts, 6,337 answers), so treat these as a small sample:
+
+- Deep Cut is the default for a listed answer that isn't well known: 73% of answers, against Rare 16%, Schooler 10%, Plankton 1%. A uniformly random listed answer would average about 75 points.
+- Long, open lists are mostly Deep Cut (wine 94%). Short, closed lists aren't (coastal countries 6%, Rare 47%), so tier is relative to the list.
+- There is exactly one One in a Krillion per prompt, 1 answer in 82 to 2,465. Each comes with a one-line fun fact and is often only moderately obscure, so it can't be predicted from rarity. Fun facts appear on 18 answers in total, so a fact doesn't guarantee a gem.
+
 Learned from the game's Puffer Party client code. The server isn't visible, and rooms can change the default settings:
 
 - Everyone starts with 2 hearts and can hold up to 5. A pop costs the holder a heart, and the last player floating wins.
