@@ -25,14 +25,26 @@
 
   const answerBox = () => document.querySelector('input[placeholder*="your puffer"]');
 
+  // The box only exists on your turn, so a click made earlier waits here until it does.
+  let pending = null;
+
   function fill(text) {
     const input = answerBox();
-    if (!input) return;
+    if (!input) {
+      pending = text;
+      render();
+      return;
+    }
+    pending = null;
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
     setter.call(input, text);
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.focus();
   }
+
+  new MutationObserver(() => {
+    if (pending && answerBox()) fill(pending);
+  }).observe(document.body, { childList: true, subtree: true });
 
   function renderHeader() {
     const header = el("header", "kh-header");
@@ -94,6 +106,7 @@
     } else if (!status && suggestions.length) {
       panel.append(renderOutOfAnswers());
     }
+    if (pending) panel.append(el("p", "kh-hint", `"${pending}" fills in when your turn starts.`));
     if (room.said.size) panel.append(el("p", "kh-hint", `${room.said.size} already tried this category.`));
   }
 
@@ -132,7 +145,9 @@
       requested = null;
       suggestions = [];
       status = null;
+      pending = null;
     } else if (room.category !== requested) {
+      pending = null;
       requestSuggestions(room.category);
     }
     render();
