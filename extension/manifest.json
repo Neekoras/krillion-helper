@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Krillion Helper",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Suggests obscure answers for Krillion and keeps a book of the answers revealed after your dives.",
   "permissions": ["storage"],
   "host_permissions": ["https://api.openai.com/*"],
@@ -24,15 +24,13 @@
   "content_scripts": [
     {
       "matches": ["https://krillion.io/*"],
-      "exclude_matches": ["https://krillion.io/party*"],
       "js": ["hook.js"],
       "world": "MAIN",
       "run_at": "document_start"
     },
     {
       "matches": ["https://krillion.io/*"],
-      "exclude_matches": ["https://krillion.io/party*"],
-      "js": ["content.js"],
+      "js": ["content.js", "party-core.js", "party.js"],
       "css": ["overlay.css"],
       "run_at": "document_idle"
     }

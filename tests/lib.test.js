@@ -173,3 +173,61 @@ test("describeError tells the player what to do", () => {
   assert.match(describeError(new TypeError("Failed to fetch")), /Can't reach/);
   assert.match(describeError(new Error("Luna returned 500")), /returned an error/);
 });
+
+await import("../extension/party-core.js");
+const { createRoom, applyMessage, isActive, remaining, normalizeAnswer } = globalThis.KrillionParty;
+const roundFields = { phase: "round", holderId: "a", category: { index: 1, text: "Name a tea", threshold: 11, accepted: 0 } };
+const snap = (isPrivate, fields = roundFields) => ({ t: "snap", room: { settings: { isPrivate }, players: [], events: [], ...fields } });
+
+test("party stays off unless the room says it is private", () => {
+  assert.equal(isActive(applyMessage(createRoom(), snap(true))), true);
+  assert.equal(isActive(applyMessage(createRoom(), snap(false))), false);
+  assert.equal(isActive(applyMessage(createRoom(), { t: "snap", room: roundFields })), false);
+  assert.equal(isActive(applyMessage(createRoom(), { t: "patch", patch: { set: roundFields } })), false);
+});
+
+test("party turns off when a private room is switched to public", () => {
+  const room = applyMessage(createRoom(), snap(true));
+  applyMessage(room, { t: "patch", patch: { set: { settings: { isPrivate: false } } } });
+  assert.equal(isActive(room), false);
+});
+
+test("party removes answers accepted or missed by anyone", () => {
+  const room = applyMessage(createRoom(), snap(true));
+  applyMessage(room, {
+    t: "patch",
+    patch: {
+      events: [
+        { kind: "pass", from: "a", to: "b", answer: "Gyokuro", tier: "deepcut" },
+        { kind: "reject", playerId: "b", text: "Hóji-cha", why: "miss" },
+      ],
+    },
+  });
+  const left = remaining(room, [{ name: "gyokuro" }, { name: "Hoji Cha" }, { name: "Sencha" }]);
+  assert.deepEqual(left, [{ name: "Sencha" }]);
+});
+
+test("party resets what was said when the category changes", () => {
+  const room = applyMessage(createRoom(), snap(true));
+  applyMessage(room, { t: "patch", patch: { events: [{ kind: "pass", answer: "Gyokuro" }] } });
+  applyMessage(room, { t: "patch", patch: { set: { category: { index: 2, text: "Name a dog" } } } });
+  assert.equal(room.category, "Name a dog");
+  assert.equal(room.said.size, 0);
+});
+
+test("party keeps what was said when only the accepted count changes", () => {
+  const room = applyMessage(createRoom(), snap(true));
+  applyMessage(room, { t: "patch", patch: { events: [{ kind: "pass", answer: "Gyokuro" }], set: { category: { index: 1, text: "Name a tea", accepted: 1 } } } });
+  assert.equal(room.said.has(normalizeAnswer("Gyokuro")), true);
+});
+
+test("party recovers said answers from players after reconnecting", () => {
+  const room = applyMessage(createRoom(), { t: "snap", room: { settings: { isPrivate: true }, ...roundFields, events: [], players: [{ lastAnswer: { text: "Bancha", tier: "rare" } }] } });
+  assert.equal(room.said.has("bancha"), true);
+});
+
+test("party turns off when the round ends", () => {
+  const room = applyMessage(createRoom(), snap(true));
+  applyMessage(room, { t: "patch", patch: { set: { phase: "over", holderId: null } } });
+  assert.equal(isActive(room), false);
+});

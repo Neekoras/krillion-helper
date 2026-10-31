@@ -170,7 +170,7 @@
 
   function poll() {
     const inDive = document.querySelector(".ds-score-pod") && !document.querySelector(".ds-begin-btn");
-    if (!inDive) {
+    if (!inDive || location.pathname.startsWith("/party")) {
       panel.hidden = true;
       return;
     }
