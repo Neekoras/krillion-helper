@@ -1,0 +1,100 @@
+body {
+  width: 320px;
+}
+
+.top {
+  padding: 12px 14px 10px;
+}
+.pace {
+  margin-top: 8px;
+  font-size: 46px;
+  line-height: 0.95;
+}
+.pace-label {
+  margin-top: 2px;
+  color: var(--mist);
+  font-size: 18px;
+}
+
+/* The water column: each band ends at the depth a dive of only that tier reaches. */
+.column {
+  position: relative;
+  border-top: 2px solid var(--foam);
+}
+.band {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 0 14px 2px;
+  font-size: 17px;
+  line-height: 1;
+}
+.band-depth {
+  margin-left: auto;
+  padding-right: 12px;
+  opacity: 0.72;
+  font-size: 15px;
+}
+.band-count {
+  min-width: 26px;
+  text-align: right;
+}
+.band[data-tier="krillion"] .band-name,
+.band[data-tier="krillion"] .band-count {
+  color: var(--gold);
+}
+
+/* The marker sits at the player's pace, on the same scale as the bands. */
+.marker {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 2px dashed var(--coral);
+  pointer-events: none;
+}
+.marker span {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  padding: 0 6px;
+  background: var(--coral);
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 18px;
+  transform: translateX(-50%);
+}
+
+.warning[hidden] {
+  display: none;
+}
+.warning {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--hull);
+}
+
+.bottom {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--hull);
+  font-size: 18px;
+}
+.meta {
+  display: flex;
+  justify-content: space-between;
+  color: var(--mist);
+}
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--sonar);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.link:hover {
+  color: var(--foam);
+}

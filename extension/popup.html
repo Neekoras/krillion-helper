@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Krillion Helper</title>
+    <link rel="stylesheet" href="ui.css" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="top">
+      <h1 class="wordmark">Krillion Helper</h1>
+      <p id="pace" class="pace"></p>
+      <p id="pace-label" class="pace-label"></p>
+    </header>
+    <div id="column" class="column" role="img"></div>
+    <section id="key-warning" class="warning" hidden>
+      <p>Suggestions need an OpenAI key.</p>
+      <button id="add-key" class="primary" type="button">Add OpenAI key</button>
+    </section>
+    <footer class="bottom">
+      <label class="switch"><input id="daily" type="checkbox" /> Suggest on the Daily Dive</label>
+      <p class="meta">
+        <span id="book"></span>
+        <button id="options" class="link" type="button">Options</button>
+      </p>
+    </footer>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

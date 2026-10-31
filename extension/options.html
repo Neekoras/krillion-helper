@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Krillion Helper options</title>
+    <link rel="stylesheet" href="ui.css" />
+    <style>
+      body {
+        min-height: 100vh;
+        background: linear-gradient(#123a5c, var(--ink) 340px);
+      }
+      main {
+        width: min(460px, 100%);
+        margin: 0 auto;
+        padding: 56px 16px;
+      }
+      .card {
+        display: grid;
+        gap: 22px;
+        margin-top: 14px;
+        padding: 20px;
+        background: var(--hull);
+        box-shadow:
+          0 0 0 2px var(--ink),
+          0 0 0 4px var(--steel),
+          0 5px 0 4px var(--ink);
+      }
+      label[for="openai"] {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 24px;
+      }
+      .field {
+        display: flex;
+        gap: 6px;
+      }
+      #openai {
+        flex: 1;
+        min-width: 0;
+        padding: 7px 9px;
+        border: 2px solid var(--steel);
+        background: var(--ink);
+      }
+      #show {
+        flex: none;
+        padding: 0 10px;
+        border: 2px solid var(--steel);
+        background: transparent;
+        color: var(--mist);
+        cursor: pointer;
+      }
+      .help {
+        margin-top: 6px;
+        color: var(--mist);
+        font-size: 18px;
+      }
+      #status {
+        color: var(--sonar);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 class="wordmark">Krillion Helper</h1>
+      <form id="form" class="card">
+        <div>
+          <label for="openai">OpenAI API key</label>
+          <div class="field">
+            <input id="openai" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" />
+            <button id="show" type="button" aria-pressed="false">Show</button>
+          </div>
+          <p class="help">Saved only in this browser and sent only to OpenAI. Each prompt uses a small amount of your OpenAI credit.</p>
+        </div>
+        <div>
+          <label class="switch"><input id="daily" type="checkbox" /> Suggest on the Daily Dive</label>
+          <p class="help">Off by default, because friends compare Daily Dive scores. Puffer Party never shows suggestions.</p>
+        </div>
+        <p id="status" role="status"></p>
+      </form>
+    </main>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

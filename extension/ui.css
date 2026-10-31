@@ -1,0 +1,101 @@
+/* Shared by the popup and the options page. */
+@font-face {
+  font-family: VT323;
+  src: url("fonts/vt323.woff2") format("woff2");
+  font-display: swap;
+}
+
+:root {
+  --ink: #050a14;
+  --hull: #101d33;
+  --steel: #24405f;
+  --sonar: #4de3ff;
+  --foam: #e8f1ff;
+  --mist: #9db8d2;
+  --coral: #ff7fa6;
+  --gold: #ffd76a;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--ink);
+  color: var(--foam);
+  font: 20px/1.15 VT323, ui-monospace, Menlo, monospace;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--sonar);
+  outline-offset: 2px;
+}
+
+.wordmark {
+  color: var(--sonar);
+  font-size: 17px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.primary {
+  padding: 7px 14px;
+  border: 0;
+  background: var(--sonar);
+  color: var(--ink);
+  box-shadow: 0 3px 0 #15708a;
+  cursor: pointer;
+}
+.primary:hover {
+  background: var(--foam);
+}
+.primary:active {
+  box-shadow: none;
+  transform: translateY(3px);
+}
+
+.switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+.switch input {
+  appearance: none;
+  flex: none;
+  width: 34px;
+  height: 18px;
+  margin: 0;
+  background: var(--steel);
+  cursor: pointer;
+}
+.switch input::before {
+  content: "";
+  display: block;
+  width: 14px;
+  height: 14px;
+  margin: 2px;
+  background: var(--mist);
+}
+.switch input:checked {
+  background: var(--sonar);
+}
+.switch input:checked::before {
+  margin-left: 18px;
+  background: var(--ink);
+}
