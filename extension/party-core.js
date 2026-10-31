@@ -1,5 +1,5 @@
 // Tracks a Puffer Party room from the messages the game already receives.
-// Runs in public and private rooms alike; it only needs a round with a category.
+// Runs in hosted rooms, public or private. Rated and Quick Play games stay off.
 (() => {
   function normalizeAnswer(text) {
     return String(text)
@@ -11,7 +11,7 @@
   }
 
   function createRoom() {
-    return { isPrivate: false, phase: null, category: null, categoryIndex: null, holderId: null, said: new Set() };
+    return { isPrivate: false, rated: false, queue: null, phase: null, category: null, categoryIndex: null, holderId: null, said: new Set() };
   }
 
   function setCategory(room, category) {
@@ -28,6 +28,8 @@
 
   function applyFields(room, fields) {
     if (fields.settings) room.isPrivate = fields.settings.isPrivate === true;
+    if ("rated" in fields) room.rated = Boolean(fields.rated);
+    if ("queue" in fields) room.queue = fields.queue;
     if ("phase" in fields) room.phase = fields.phase;
     if ("holderId" in fields) room.holderId = fields.holderId;
     if ("category" in fields) setCategory(room, fields.category);
@@ -64,7 +66,7 @@
   }
 
   function isActive(room) {
-    return room.phase === "round" && Boolean(room.category);
+    return !room.rated && !room.queue && room.phase === "round" && Boolean(room.category);
   }
 
   function remaining(room, suggestions) {

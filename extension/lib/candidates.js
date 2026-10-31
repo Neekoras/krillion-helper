@@ -21,6 +21,18 @@ export function buildQuery(prompt) {
   );
 }
 
+// Puffer Party only needs an accepted answer before the puffer pops, and everyone
+// in the room uses answers up, so this asks for safe answers and plenty of them.
+export function buildSurvivalQuery(prompt) {
+  return (
+    `Party game category: "${prompt}". List 40 answers that a broad reference list ` +
+    `of answers would certainly include, starting with the ones you are most sure ` +
+    `of. Mix very common answers with moderately well-known ones. Use the plain ` +
+    `name most people would type, with no added words or punctuation. Every answer ` +
+    `must clearly satisfy the category in its most ordinary meaning.`
+  );
+}
+
 // Models sometimes pad lists with doubled words such as "Hominidae hominidae".
 function looksPadded(name) {
   const words = name.toLowerCase().split(/\s+/);
@@ -51,13 +63,13 @@ function outputText(data) {
   return "{}";
 }
 
-async function ask(prompt, openaiKey, fetchFn) {
+async function ask(prompt, openaiKey, fetchFn, query) {
   const res = await fetchFn("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${openaiKey}` },
     body: JSON.stringify({
       model: "gpt-6-luna",
-      input: buildQuery(prompt),
+      input: query(prompt),
       reasoning: { effort: "none" },
       text: { format: { type: "json_schema", name: "answers", strict: true, schema: SCHEMA } },
     }),
@@ -68,7 +80,7 @@ async function ask(prompt, openaiKey, fetchFn) {
 }
 
 // An empty reply gets one retry.
-export async function getCandidates(prompt, openaiKey, fetchFn = fetch) {
-  const first = await ask(prompt, openaiKey, fetchFn);
-  return first.length ? first : ask(prompt, openaiKey, fetchFn);
+export async function getCandidates(prompt, openaiKey, fetchFn = fetch, query = buildQuery) {
+  const first = await ask(prompt, openaiKey, fetchFn, query);
+  return first.length ? first : ask(prompt, openaiKey, fetchFn, query);
 }

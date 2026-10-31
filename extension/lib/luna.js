@@ -3,6 +3,7 @@
 
 const TIMEOUT_MS = 4000;
 const MIN_FIT = 0.1;
+const MIN_SURVIVAL_FIT = 0.5;
 
 const OBSCURITY_LEVELS = [
   { label: "Almost everyone would think of this answer" },
@@ -49,7 +50,24 @@ export function applyGrades(candidates, answers) {
     .map((c) => c.name);
 }
 
-export async function grade(prompt, candidates, openaiKey, fetchFn = fetch) {
+// Puffer Party is about staying alive. A pop costs a heart, and a heart takes 600
+// points of answers to earn back, so being accepted comes first. Rarity only
+// separates answers that are about equally safe, since rarer ones fill the meter faster.
+export function rankForSurvival(candidates, answers) {
+  const byName = new Map(answers.map((a) => [a.name, a]));
+  return candidates
+    .map((name, i) => {
+      const fits = byName.get(`fits_${i}`)?.probability ?? 0;
+      const listed = byName.get(`listed_${i}`)?.probability ?? 0;
+      const obscure = byName.get(`obscure_${i}`)?.score ?? 0;
+      return { name, fits, rank: (listed * fits) ** 3 * (1 + obscure / 6), i };
+    })
+    .filter((c) => c.fits >= MIN_SURVIVAL_FIT)
+    .sort((a, b) => b.rank - a.rank || a.i - b.i)
+    .map((c) => c.name);
+}
+
+export async function grade(prompt, candidates, openaiKey, fetchFn = fetch, rank = applyGrades) {
   const res = await fetchFn("https://api.openai.com/v1/decisions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${openaiKey}` },
@@ -58,5 +76,5 @@ export async function grade(prompt, candidates, openaiKey, fetchFn = fetch) {
   });
   if (!res.ok) throw new Error(`Luna returned ${res.status}`);
   const data = await res.json();
-  return applyGrades(candidates, data.answers);
+  return rank(candidates, data.answers);
 }

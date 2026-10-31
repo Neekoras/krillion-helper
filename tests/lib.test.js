@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getCandidates, parseAnswers } from "../extension/lib/candidates.js";
-import { applyGrades, buildRequest, grade } from "../extension/lib/luna.js";
+import { buildSurvivalQuery, getCandidates, parseAnswers } from "../extension/lib/candidates.js";
+import { applyGrades, buildRequest, grade, rankForSurvival } from "../extension/lib/luna.js";
 import { addReveal, diveDepth, merge, promptKey, summarize } from "../extension/lib/book.js";
 import { describeError } from "../extension/lib/messages.js";
 
@@ -73,6 +73,43 @@ test("applyGrades removes only confident misses and doesn't rank by fit", () => 
     ["France", 1, 0.5, 1],
   ];
   assert.deepEqual(applyGrades(rows.map(([n]) => n), grades(rows)), ["Comoros", "France"]);
+});
+
+test("rankForSurvival puts safe answers ahead of rare risky ones", () => {
+  const rows = [
+    ["Invented tea", 0.3, 3, 0.9],
+    ["Gyokuro", 0.95, 2.5, 0.9],
+    ["Green tea", 1, 0, 1],
+    ["Sencha", 0.95, 1.5, 0.9],
+  ];
+  assert.deepEqual(rankForSurvival(rows.map(([n]) => n), grades(rows)), ["Green tea", "Gyokuro", "Sencha", "Invented tea"]);
+});
+
+test("rankForSurvival uses rarity to separate equally safe answers", () => {
+  const rows = [
+    ["Black tea", 0.95, 0, 0.95],
+    ["Oolong", 0.95, 2, 0.95],
+  ];
+  assert.deepEqual(rankForSurvival(rows.map(([n]) => n), grades(rows)), ["Oolong", "Black tea"]);
+});
+
+test("rankForSurvival removes answers that probably don't fit", () => {
+  const rows = [
+    ["Comoros", 0.9, 3, 0.2],
+    ["France", 1, 0.5, 1],
+  ];
+  assert.deepEqual(rankForSurvival(rows.map(([n]) => n), grades(rows)), ["France"]);
+});
+
+test("getCandidates can ask for safe answers", async () => {
+  let body;
+  const fetchFn = async (_url, init) => {
+    body = JSON.parse(init.body);
+    return { ok: true, json: async () => ({ output: [{ content: [{ type: "output_text", text: '{"answers":["Green tea"]}' }] }] }) };
+  };
+  await getCandidates("Name a tea", "k", fetchFn, buildSurvivalQuery);
+  assert.equal(body.input, buildSurvivalQuery("Name a tea"));
+  assert.doesNotMatch(body.input, /would not think/);
 });
 
 test("applyGrades removes a candidate whose fit question was refused", () => {
@@ -183,6 +220,15 @@ test("party runs in public and private rooms during a round", () => {
   assert.equal(isActive(applyMessage(createRoom(), snap(true))), true);
   assert.equal(isActive(applyMessage(createRoom(), snap(false))), true);
   assert.equal(isActive(applyMessage(createRoom(), { t: "snap", room: roundFields })), true);
+});
+
+test("party stays off in rated and quick play games", () => {
+  assert.equal(isActive(applyMessage(createRoom(), snap(false, { ...roundFields, rated: true, queue: "party" }))), false);
+  assert.equal(isActive(applyMessage(createRoom(), snap(false, { ...roundFields, rated: false, queue: "duel" }))), false);
+  assert.equal(isActive(applyMessage(createRoom(), snap(false, { ...roundFields, rated: true }))), false);
+  const room = applyMessage(createRoom(), snap(false));
+  applyMessage(room, { t: "patch", patch: { set: { rated: true } } });
+  assert.equal(isActive(room), false);
 });
 
 test("party stays off outside a round or without a category", () => {

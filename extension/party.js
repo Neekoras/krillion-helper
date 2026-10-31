@@ -1,4 +1,4 @@
-// The Puffer Party panel. It appears in any room during a round and never submits for you.
+// The Puffer Party panel. It appears during a round in hosted rooms and never submits for you.
 (() => {
   const { createRoom, applyMessage, isActive, remaining } = globalThis.KrillionParty;
   const VISIBLE = 6;
@@ -23,28 +23,17 @@
     return node;
   }
 
-  const answerBox = () => document.querySelector('input[placeholder*="your puffer"]');
-
-  // The box only exists on your turn, so a click made earlier waits here until it does.
-  let pending = null;
+  // The box stays on the page all round, but its placeholder only says "your puffer" on your turn.
+  const answerBox = () => document.querySelector('input[aria-label="Your answer"]');
 
   function fill(text) {
     const input = answerBox();
-    if (!input) {
-      pending = text;
-      render();
-      return;
-    }
-    pending = null;
+    if (!input) return;
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
     setter.call(input, text);
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.focus();
   }
-
-  new MutationObserver(() => {
-    if (pending && answerBox()) fill(pending);
-  }).observe(document.body, { childList: true, subtree: true });
 
   function renderHeader() {
     const header = el("header", "kh-header");
@@ -106,7 +95,6 @@
     } else if (!status && suggestions.length) {
       panel.append(renderOutOfAnswers());
     }
-    if (pending) panel.append(el("p", "kh-hint", `"${pending}" fills in when your turn starts.`));
     if (room.said.size) panel.append(el("p", "kh-hint", `${room.said.size} already tried this category.`));
   }
 
@@ -123,7 +111,7 @@
     render();
     let reply;
     try {
-      reply = await chrome.runtime.sendMessage({ type: "suggest", prompt: category });
+      reply = await chrome.runtime.sendMessage({ type: "suggest", prompt: category, mode: "party" });
     } catch {
       if (category === requested) {
         status = { text: "Lost connection to the extension. Refresh this page." };
@@ -145,9 +133,7 @@
       requested = null;
       suggestions = [];
       status = null;
-      pending = null;
     } else if (room.category !== requested) {
-      pending = null;
       requestSuggestions(room.category);
     }
     render();
