@@ -1,7 +1,8 @@
-// Runs in the page so it can see the game's own API responses. It only reads
-// them; it never sends requests or changes what the game receives.
+// Runs in the page so it can see the game's own traffic. It only reads messages;
+// it never sends requests or changes what the game receives.
 (() => {
   const realFetch = window.fetch;
+  const RealWebSocket = window.WebSocket;
 
   function post(type, payload) {
     window.postMessage({ source: "krillion-helper", type, payload }, location.origin);
@@ -25,5 +26,26 @@
       inspect(url, init, response).catch(() => {});
     }
     return response;
+  };
+
+  // Puffer Party room updates arrive over a WebSocket. Chat is left out.
+  function inspectRoomMessage(event) {
+    let message;
+    try {
+      message = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    if (message.t !== "snap" && message.t !== "patch") return;
+    const { chat, ...room } = message.room ?? {};
+    const { chat: patchChat, ...patch } = message.patch ?? {};
+    post("party", message.t === "snap" ? { t: "snap", room } : { t: "patch", patch });
+  }
+
+  window.WebSocket = class extends RealWebSocket {
+    constructor(url, protocols) {
+      super(url, protocols);
+      if (/\/rooms\/[^/]+\/ws/.test(String(url))) this.addEventListener("message", inspectRoomMessage);
+    }
   };
 })();
