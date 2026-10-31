@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildSurvivalQuery, getCandidates, parseAnswers } from "../extension/lib/candidates.js";
 import { applyGrades, buildRequest, grade, rankForSurvival } from "../extension/lib/luna.js";
-import { addReveal, diveDepth, merge, promptKey, summarize } from "../extension/lib/book.js";
+import { addReveal, applyKnown, diveDepth, merge, promptKey, recordAnswers, summarize } from "../extension/lib/book.js";
 import { describeError } from "../extension/lib/messages.js";
 
 test("parseAnswers removes duplicates and padded names", () => {
@@ -212,7 +212,7 @@ test("describeError tells the player what to do", () => {
 });
 
 await import("../extension/party-core.js");
-const { createRoom, applyMessage, isActive, remaining, normalizeAnswer } = globalThis.KrillionParty;
+const { createRoom, applyMessage, observedAnswers, isActive, remaining, normalizeAnswer } = globalThis.KrillionParty;
 const roundFields = { phase: "round", holderId: "a", category: { index: 1, text: "Name a tea", threshold: 11, accepted: 0 } };
 const snap = (isPrivate, fields = roundFields) => ({ t: "snap", room: { settings: { isPrivate }, players: [], events: [], ...fields } });
 
@@ -268,6 +268,98 @@ test("party keeps what was said when only the accepted count changes", () => {
 test("party recovers said answers from players after reconnecting", () => {
   const room = applyMessage(createRoom(), { t: "snap", room: { settings: { isPrivate: true }, ...roundFields, events: [], players: [{ lastAnswer: { text: "Bancha", tier: "rare" } }] } });
   assert.equal(room.said.has("bancha"), true);
+});
+
+const observe = (room, message) => {
+  const before = { category: room.category, categoryIndex: room.categoryIndex };
+  applyMessage(room, message);
+  return observedAnswers(before, room, message);
+};
+
+test("party observes accepted tiers and misses but not repeats", () => {
+  const room = applyMessage(createRoom(), snap(false));
+  const items = observe(room, {
+    t: "patch",
+    patch: {
+      events: [
+        { kind: "pass", answer: "Gyokuro", tier: "krillion" },
+        { kind: "reject", text: "Banana", why: "miss" },
+        { kind: "reject", text: "Gyokuro", why: "repeat" },
+      ],
+    },
+  });
+  assert.deepEqual(items, [
+    { prompt: "Name a tea", name: "Gyokuro", tier: "krillion" },
+    { prompt: "Name a tea", name: "Banana", tier: null },
+  ]);
+});
+
+test("party credits the answer that clears a category to the old category", () => {
+  const room = applyMessage(createRoom(), snap(false));
+  const items = observe(room, {
+    t: "patch",
+    patch: {
+      set: { category: { index: 2, text: "Name a dog" } },
+      events: [
+        { kind: "pass", answer: "Gyokuro", tier: "rare" },
+        { kind: "category", why: "cleared", index: 2 },
+        { kind: "pass", answer: "Akita", tier: "schooler" },
+      ],
+    },
+  });
+  assert.deepEqual(items, [
+    { prompt: "Name a tea", name: "Gyokuro", tier: "rare" },
+    { prompt: "Name a dog", name: "Akita", tier: "schooler" },
+  ]);
+});
+
+test("party skips answers it can't place in a category", () => {
+  const room = applyMessage(createRoom(), snap(false));
+  const noEvent = { t: "patch", patch: { set: { category: { index: 2, text: "Name a dog" } }, events: [{ kind: "pass", answer: "Gyokuro", tier: "rare" }] } };
+  assert.deepEqual(observe(room, noEvent), []);
+  const older = { t: "snap", room: { settings: { isPrivate: false }, ...roundFields, players: [], events: [{ kind: "pass", answer: "Akita", tier: "rare" }, { kind: "category", why: "pop", index: 1 }] } };
+  assert.deepEqual(observe(createRoom(), older), []);
+});
+
+test("party observes nothing in rated or quick play games", () => {
+  const room = applyMessage(createRoom(), snap(false, { ...roundFields, rated: true, queue: "duel" }));
+  assert.deepEqual(observe(room, { t: "patch", patch: { events: [{ kind: "pass", answer: "Gyokuro", tier: "rare" }] } }), []);
+});
+
+test("recordAnswers keeps tiers per question and a miss can't erase one", () => {
+  let seen = recordAnswers({}, [
+    { prompt: "Name a tea", name: "Gyokuro", tier: "krillion" },
+    { prompt: "Name a tea", name: "Banana", tier: null },
+    { prompt: "Name a dog", name: "Akita", tier: "rare" },
+  ]);
+  seen = recordAnswers(seen, [{ prompt: "name a  TEA", name: "gyokuro", tier: null }]);
+  assert.deepEqual(seen["name a tea"], { gyokuro: { name: "Gyokuro", tier: "krillion" }, banana: { tier: null } });
+  assert.deepEqual(seen["name a dog"], { akita: { name: "Akita", tier: "rare" } });
+});
+
+test("recordAnswers lets an accepted answer replace an old miss", () => {
+  const seen = recordAnswers({ "name a tea": { chai: { tier: null } } }, [{ prompt: "Name a tea", name: "Chai", tier: "plankton" }]);
+  assert.equal(seen["name a tea"].chai.tier, "plankton");
+});
+
+test("applyKnown labels, drops misses and puts known answers first in a party", () => {
+  const entry = {
+    "green tea": { name: "Green tea", tier: "plankton" },
+    gyokuro: { name: "Gyokuro", tier: "krillion" },
+    banana: { tier: null },
+  };
+  const out = applyKnown(entry, [{ name: "Sencha" }, { name: "Banana" }, { name: "green tea" }], { party: true });
+  assert.deepEqual(out, [{ name: "Gyokuro", tier: "krillion" }, { name: "green tea", tier: "plankton" }, { name: "Sencha" }]);
+});
+
+test("applyKnown puts low tiers last in a dive", () => {
+  const entry = { "green tea": { name: "Green tea", tier: "plankton" }, oolong: { name: "Oolong", tier: "rare" } };
+  const out = applyKnown(entry, [{ name: "Green tea" }, { name: "Sencha" }]);
+  assert.deepEqual(out, [{ name: "Oolong", tier: "rare" }, { name: "Sencha" }, { name: "Green tea", tier: "plankton" }]);
+});
+
+test("applyKnown leaves suggestions alone for a new question", () => {
+  assert.deepEqual(applyKnown(undefined, [{ name: "Sencha" }]), [{ name: "Sencha" }]);
 });
 
 test("party turns off when the round ends", () => {

@@ -195,6 +195,10 @@
     true,
   );
 
+  function rememberSeen(name, tier) {
+    if (currentPrompt) chrome.runtime.sendMessage({ type: "seen", items: [{ prompt: currentPrompt, name, tier }] });
+  }
+
   window.addEventListener("message", (event) => {
     if (event.source !== window || event.data?.source !== "krillion-helper") return;
     const { type, payload } = event.data;
@@ -211,7 +215,9 @@
           score: payload.score,
           fromHelper: suggestions.some((s) => s.name === payload.answer || s.name === payload.guess),
         });
+        rememberSeen(payload.answer, payload.tier);
       } else if (!payload.correction) {
+        rememberSeen(payload.guess, null);
         const guess = String(payload.guess).trim().toLowerCase();
         const remaining = suggestions.filter((s) => s.name.toLowerCase() !== guess);
         if (remaining.length < suggestions.length) {

@@ -1,7 +1,15 @@
 // The Puffer Party panel. It appears during a round in hosted rooms and never submits for you.
 (() => {
-  const { createRoom, applyMessage, isActive, remaining } = globalThis.KrillionParty;
+  const { createRoom, applyMessage, observedAnswers, isActive, remaining } = globalThis.KrillionParty;
   const VISIBLE = 6;
+  const TIER_LABEL = {
+    krillion: "One in a Krillion",
+    deepcut: "Deep Cut",
+    rare: "Rare",
+    schooler: "Schooler",
+    tooclever: "Too Clever",
+    plankton: "Plankton",
+  };
 
   const room = createRoom();
   let requested = null;
@@ -72,6 +80,7 @@
     button.append(el("kbd", "kh-key", String(index + 1)));
     const text = el("span", "kh-text");
     text.append(el("span", "kh-answer", s.name));
+    if (s.tier) text.append(el("span", "kh-tag", TIER_LABEL[s.tier] ?? s.tier));
     button.append(text);
     button.addEventListener("click", () => fill(s.name));
     item.append(button);
@@ -128,7 +137,10 @@
 
   window.addEventListener("message", (event) => {
     if (event.source !== window || event.data?.source !== "krillion-helper" || event.data.type !== "party") return;
+    const before = { category: room.category, categoryIndex: room.categoryIndex };
     applyMessage(room, event.data.payload);
+    const items = observedAnswers(before, room, event.data.payload);
+    if (items.length) chrome.runtime.sendMessage({ type: "seen", items }).catch(() => {});
     if (!isActive(room)) {
       requested = null;
       suggestions = [];

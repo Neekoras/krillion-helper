@@ -65,6 +65,32 @@
     return room;
   }
 
+  // Which answers this message showed, and for which category. Call it after
+  // applyMessage, with the category from before. A pass that clears a category
+  // arrives together with the next category, so events are split around the
+  // category change, and anything that can't be placed for certain is left out.
+  function observedAnswers(before, room, message) {
+    if (room.rated || room.queue) return [];
+    const events = (message.t === "snap" ? message.room?.events : message.patch?.events) ?? [];
+    const changes = events.flatMap((event, i) => (event.kind === "category" ? [i] : []));
+    const changed = room.categoryIndex !== before.categoryIndex;
+    const first = changes[0] ?? events.length;
+    const last = changes.at(-1) ?? -1;
+    if (message.t === "patch" && changed && !changes.length) return [];
+
+    const items = [];
+    const add = (prompt, event) => {
+      if (!prompt) return;
+      if (event.kind === "pass" && event.answer && event.tier) items.push({ prompt, name: event.answer, tier: event.tier });
+      if (event.kind === "reject" && event.why === "miss" && event.text) items.push({ prompt, name: event.text, tier: null });
+    };
+    if (message.t === "patch" && changed && changes.length === 1) {
+      events.slice(0, first).forEach((event) => add(before.category, event));
+    }
+    events.slice(last + 1).forEach((event) => add(room.category, event));
+    return items;
+  }
+
   function isActive(room) {
     return !room.rated && !room.queue && room.phase === "round" && Boolean(room.category);
   }
@@ -73,5 +99,5 @@
     return suggestions.filter((s) => !room.said.has(normalizeAnswer(s.name)));
   }
 
-  globalThis.KrillionParty = { normalizeAnswer, createRoom, applyMessage, isActive, remaining };
+  globalThis.KrillionParty = { normalizeAnswer, createRoom, applyMessage, observedAnswers, isActive, remaining };
 })();
