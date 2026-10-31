@@ -1,5 +1,5 @@
 // Tracks a Puffer Party room from the messages the game already receives.
-// Everything stays off unless the room says it is private.
+// Runs in public and private rooms alike; it only needs a round with a category.
 (() => {
   function normalizeAnswer(text) {
     return String(text)
@@ -64,7 +64,7 @@
   }
 
   function isActive(room) {
-    return room.isPrivate && room.phase === "round" && Boolean(room.category);
+    return room.phase === "round" && Boolean(room.category);
   }
 
   function remaining(room, suggestions) {

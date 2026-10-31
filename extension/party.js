@@ -1,4 +1,4 @@
-// The Puffer Party panel. It only appears in private rooms and never submits for you.
+// The Puffer Party panel. It appears in any room during a round and never submits for you.
 (() => {
   const { createRoom, applyMessage, isActive, remaining } = globalThis.KrillionParty;
   const VISIBLE = 6;
@@ -36,7 +36,7 @@
 
   function renderHeader() {
     const header = el("header", "kh-header");
-    header.append(el("span", "kh-name", "Private room"));
+    header.append(el("span", "kh-name", "Puffer Party"));
     const toggle = el("button", "kh-collapse", collapsed ? "+" : "–");
     toggle.type = "button";
     toggle.setAttribute("aria-expanded", String(!collapsed));

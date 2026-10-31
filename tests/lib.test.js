@@ -179,17 +179,15 @@ const { createRoom, applyMessage, isActive, remaining, normalizeAnswer } = globa
 const roundFields = { phase: "round", holderId: "a", category: { index: 1, text: "Name a tea", threshold: 11, accepted: 0 } };
 const snap = (isPrivate, fields = roundFields) => ({ t: "snap", room: { settings: { isPrivate }, players: [], events: [], ...fields } });
 
-test("party stays off unless the room says it is private", () => {
+test("party runs in public and private rooms during a round", () => {
   assert.equal(isActive(applyMessage(createRoom(), snap(true))), true);
-  assert.equal(isActive(applyMessage(createRoom(), snap(false))), false);
-  assert.equal(isActive(applyMessage(createRoom(), { t: "snap", room: roundFields })), false);
-  assert.equal(isActive(applyMessage(createRoom(), { t: "patch", patch: { set: roundFields } })), false);
+  assert.equal(isActive(applyMessage(createRoom(), snap(false))), true);
+  assert.equal(isActive(applyMessage(createRoom(), { t: "snap", room: roundFields })), true);
 });
 
-test("party turns off when a private room is switched to public", () => {
-  const room = applyMessage(createRoom(), snap(true));
-  applyMessage(room, { t: "patch", patch: { set: { settings: { isPrivate: false } } } });
-  assert.equal(isActive(room), false);
+test("party stays off outside a round or without a category", () => {
+  assert.equal(isActive(applyMessage(createRoom(), snap(false, { ...roundFields, phase: "lobby" }))), false);
+  assert.equal(isActive(applyMessage(createRoom(), snap(false, { ...roundFields, category: null }))), false);
 });
 
 test("party removes answers accepted or missed by anyone", () => {
