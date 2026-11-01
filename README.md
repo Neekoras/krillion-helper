@@ -10,7 +10,7 @@ A personal Chrome extension that suggests obscure answers while you play [Krilli
 
 ## How it works
 
-- **Suggestions:** when a prompt appears, GPT-6 Luna generates up to 40 obscure answers and the Decisions API ranks them by obscurity times the squared chance a reference list includes them. It also removes answers it's confident don't fit the prompt. The panel shows the top six, and when one is rejected the next moves up. Click one or press Alt + its number to fill the answer box, then press Enter yourself.
+- **Suggestions:** when a prompt appears, GPT-6 Luna generates up to 40 obscure answers and the Decisions API ranks them by obscurity (capped at enthusiast level) plus gem potential, times the squared chance a reference list includes them. It also removes answers it's confident don't fit the prompt. The panel shows the top six, and when one is rejected the next moves up. Click one or press Alt + its number to fill the answer box, then press Enter yourself.
 - **Answer book:** when you finish a dive, the game shows that dive's answers. The extension saves the top answer and some Deep Cuts for each prompt and shows them first if the prompt comes up again.
 - **Known answers:** the extension remembers, per question, the answers it sees during play: tiers for accepted answers, and which ones were rejected. If a question comes up again, known answers show their tier and known misses are left out. This only uses what the game already shows you, and it never looks up answer lists.
 - **Where it runs:** Unlimited, Archive and themed packs. On the Daily Dive, suggestions stay off until you turn them on from the panel. In Puffer Party, it runs in hosted public and private rooms during a round. Rated and Quick Play stay off.

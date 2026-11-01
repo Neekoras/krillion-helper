@@ -1,7 +1,8 @@
 // Uses OpenAI's Decisions API to rank candidates the way the game rewards them.
 // Being accepted matters most, so likely-listed answers outrank merely obscure ones.
 
-const TIMEOUT_MS = 4000;
+const TIMEOUT_MS = 6000;
+const GEM_WEIGHT = 2;
 const MIN_FIT = 0.1;
 const MIN_SURVIVAL_FIT = 0.5;
 const ENOUGH_OBSCURITY = 2; // "Only enthusiasts would think of this answer"
@@ -13,7 +14,7 @@ const OBSCURITY_LEVELS = [
   { label: "Almost nobody would think of this answer" },
 ];
 
-export function buildRequest(prompt, candidates) {
+export function buildRequest(prompt, candidates, { gems = false } = {}) {
   const questions = candidates.flatMap((name, i) => [
     {
       type: "predicate",
@@ -31,6 +32,15 @@ export function buildRequest(prompt, candidates) {
       name: `fits_${i}`,
       instructions: `Taking every word of the trivia prompt strictly and in its most ordinary meaning, "${name}" clearly meets every condition in the prompt. Borderline, disputed or technically-related cases do not count.`,
     },
+    ...(gems
+      ? [
+          {
+            type: "predicate",
+            name: `gem_${i}`,
+            instructions: `A trivia game's host, picking the single most satisfying answer to the prompt, would choose "${name}": some players could actually know it, and one vivid, surprising fact makes it fun to land on.`,
+          },
+        ]
+      : []),
   ]);
   return { model: "gpt-6-luna", input: `Trivia prompt: ${prompt}`, questions };
 }
@@ -38,7 +48,8 @@ export function buildRequest(prompt, candidates) {
 // The fit check only removes confident misses. Testing showed that ranking by it
 // pushes suggestions toward mainstream answers that score lower.
 // Deep Cut is most of a typical answer list, so obscurity stops helping once only
-// enthusiasts would think of an answer. Past that, the chance of being listed decides.
+// enthusiasts would think of an answer. Past that, the chance of being listed decides,
+// along with gem potential, since each prompt's top answer is hand-picked for being fun.
 export function applyGrades(candidates, answers) {
   const byName = new Map(answers.map((a) => [a.name, a]));
   return candidates
@@ -46,7 +57,9 @@ export function applyGrades(candidates, answers) {
       const fit = byName.get(`fits_${i}`);
       const listed = byName.get(`listed_${i}`)?.probability ?? 0;
       const obscure = byName.get(`obscure_${i}`)?.score ?? 0;
-      return { name, fits: fit?.probability ?? 0, rank: Math.min(obscure, ENOUGH_OBSCURITY) * listed ** 2, i };
+      const gem = byName.get(`gem_${i}`)?.probability ?? 0;
+      const value = Math.min(obscure, ENOUGH_OBSCURITY) + GEM_WEIGHT * gem;
+      return { name, fits: fit?.probability ?? 0, rank: value * listed ** 2, i };
     })
     .filter((c) => c.fits >= MIN_FIT)
     .sort((a, b) => b.rank - a.rank || a.i - b.i)
@@ -74,7 +87,7 @@ export async function grade(prompt, candidates, openaiKey, fetchFn = fetch, rank
   const res = await fetchFn("https://api.openai.com/v1/decisions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${openaiKey}` },
-    body: JSON.stringify(buildRequest(prompt, candidates)),
+    body: JSON.stringify(buildRequest(prompt, candidates, { gems: rank === applyGrades })),
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`Luna returned ${res.status}`);

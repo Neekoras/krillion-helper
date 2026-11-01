@@ -83,6 +83,30 @@ test("applyGrades stops rewarding obscurity once only enthusiasts know an answer
   assert.deepEqual(applyGrades(rows.map(([n]) => n), grades(rows)), ["Enthusiast pick", "Almost unknown"]);
 });
 
+test("applyGrades lifts likely gems above equally obscure answers", () => {
+  const candidates = ["Plain pick", "Story pick"];
+  const answers = [
+    ...grades([["Plain pick", 0.9, 2, 0.9], ["Story pick", 0.9, 2, 0.9]]),
+    { type: "predicate", name: "gem_0", probability: 0.1 },
+    { type: "predicate", name: "gem_1", probability: 0.8 },
+  ];
+  assert.deepEqual(applyGrades(candidates, answers), ["Story pick", "Plain pick"]);
+});
+
+test("only dive ranking pays for the gem question", async () => {
+  const sentNames = async (rank) => {
+    let body;
+    const fetchFn = async (_url, init) => {
+      body = JSON.parse(init.body);
+      return { ok: true, json: async () => ({ answers: [] }) };
+    };
+    await grade("Name a tea", ["Sencha"], "k", fetchFn, rank);
+    return body.questions.map((q) => q.name);
+  };
+  assert.deepEqual(await sentNames(applyGrades), ["listed_0", "obscure_0", "fits_0", "gem_0"]);
+  assert.deepEqual(await sentNames(rankForSurvival), ["listed_0", "obscure_0", "fits_0"]);
+});
+
 test("rankForSurvival puts safe answers ahead of rare risky ones", () => {
   const rows = [
     ["Invented tea", 0.3, 3, 0.9],

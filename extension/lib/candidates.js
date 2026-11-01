@@ -16,8 +16,9 @@ export function buildQuery(prompt) {
     `Trivia prompt: "${prompt}". List 40 answers that most people would not think ` +
     `of but that have their own Wikipedia article or appear on a Wikipedia list. ` +
     `Use the common English name exactly as Wikipedia titles it, with no added ` +
-    `words or punctuation. Leave out famous examples. Every answer must strictly ` +
-    `satisfy the prompt.`
+    `words or punctuation. Leave out famous examples and the usual "obscure" picks ` +
+    `that everyone reaches for. Favor answers enthusiasts know that have one vivid, ` +
+    `surprising fact or story behind them. Every answer must strictly satisfy the prompt.`
   );
 }
 
