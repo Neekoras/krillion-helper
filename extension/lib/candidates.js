@@ -22,6 +22,17 @@ export function buildQuery(prompt) {
   );
 }
 
+// playdaily.org pays most for its rarest tiers and accepts answers beyond the lists
+// it shows, so this skips the Wikipedia limit and goes as deep as it can.
+export function buildDeepQuery(prompt) {
+  return (
+    `Trivia prompt: "${prompt}". List 40 real answers that almost nobody would think ` +
+    `of, starting with the rarest. Leave out famous examples and the usual "obscure" ` +
+    `picks that everyone reaches for. Use the plain common name, with no added words ` +
+    `or punctuation. Every answer must strictly satisfy the prompt.`
+  );
+}
+
 // Puffer Party only needs an accepted answer before the puffer pops, and everyone
 // in the room uses answers up, so this asks for safe answers and plenty of them.
 export function buildSurvivalQuery(prompt) {

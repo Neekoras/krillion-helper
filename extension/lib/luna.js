@@ -67,6 +67,22 @@ export function applyGrades(candidates, answers) {
     .map((c) => c.name);
 }
 
+// playdaily.org doubles its points at each tier (4, 8, 16, 32, 64) before 100 at the
+// top, so obscurity keeps paying all the way down, unlike on krillion.io.
+export function rankForDeepTiers(candidates, answers) {
+  const byName = new Map(answers.map((a) => [a.name, a]));
+  return candidates
+    .map((name, i) => {
+      const fits = byName.get(`fits_${i}`)?.probability ?? 0;
+      const listed = byName.get(`listed_${i}`)?.probability ?? 0;
+      const obscure = byName.get(`obscure_${i}`)?.score ?? 0;
+      return { name, fits, rank: Math.min(100, 4 * 4 ** obscure) * listed ** 2, i };
+    })
+    .filter((c) => c.fits >= MIN_FIT)
+    .sort((a, b) => b.rank - a.rank || a.i - b.i)
+    .map((c) => c.name);
+}
+
 // Puffer Party is about staying alive. A pop costs a heart, and a heart takes 600
 // points of answers to earn back, so being accepted comes first. Rarity only
 // separates answers that are about equally safe, since rarer ones fill the meter faster.

@@ -14,6 +14,7 @@ A personal Chrome extension that suggests obscure answers while you play [Krilli
 - **Answer book:** when you finish a dive, the game shows that dive's answers. The extension saves the top answer and some Deep Cuts for each prompt and shows them first if the prompt comes up again.
 - **Known answers:** the extension remembers, per question, the answers it sees during play: tiers for accepted answers, and which ones were rejected. If a question comes up again, known answers show their tier and known misses are left out. This only uses what the game already shows you, and it never looks up answer lists.
 - **Where it runs:** Unlimited, Archive and themed packs. On the Daily Dive, suggestions stay off until you turn them on from the panel. In Puffer Party, it runs in hosted public and private rooms during a round. Rated and Quick Play stay off.
+- **playdaily.org:** dives at playdaily.org/krillion, Classic and Endless, also get suggestions, ranked for that site's steeper points. It keeps its own saved answers, separate from krillion.io, and doesn't count toward the toolbar popup. Its 1 vs 1 and multiplayer stay off.
 - **Toolbar popup:** shows your dive pace on a water column, how many answers landed in each tier, and a switch for the Daily Dive.
 - **Puffer Party:** suggests answers for the current category, safest first, and removes anything already accepted or missed by anyone in the room. Clicking one fills the answer box at any point in the round, so you can have it ready before your turn. It reads the game's room messages but never sends anything or submits for you.
 
@@ -56,6 +57,17 @@ Learned from the game's Puffer Party client code. The server isn't visible, and 
 - Each accepted answer adds its tier's points to a meter: Plankton 10, Too Clever 15, Schooler 30, Rare 60, Deep Cut 85, One in a Krillion 100. At 600 you gain a heart.
 - A category ends when enough answers are accepted (`threshold`) or when someone pops.
 - Answer lists come from dictionaries, wiki pages and encyclopedias, and include aliases, according to the FAQ.
+
+Learned from six Classic dives on playdaily.org, a separate game with different grading:
+
+- Playing the top suggestions, the deeper ranking scored 320 and 484 out of 700, and the krillion.io ranking scored 356 and 352. Those were different prompts in each dive, so this is a small sample.
+
+- Tiers are worth 4, 8, 16, 32, 64 and 100 points, so obscurity pays much more than on krillion.io.
+- A prompt can have several One in a Krillion answers, and the lists after a dive are short (25 to about 60 answers).
+- Answers not on those lists can still be accepted: Bublik scored Deep Cut for "a food that has a hole in it" but wasn't on the list shown.
+- Too Clever here is the answer that feels clever but many people give: Pomegranate for "a thing that contains seeds", Bahrain for "a country in the Middle East".
+- Close spellings and near names are accepted straight away (Umamii to Umami, Crochet needle to Crochet Hook), with no second Enter.
+- `POST /api/krillion/deal` gives all 7 prompts, `POST /api/krillion/answer` grades one, and `GET /api/krillion/answers` returns a prompt's list after the dive.
 
 ## Development
 

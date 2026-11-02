@@ -23,14 +23,20 @@
   "options_page": "options.html",
   "content_scripts": [
     {
-      "matches": ["https://krillion.io/*"],
+      "matches": ["https://krillion.io/*", "https://playdaily.org/*"],
       "js": ["hook.js"],
       "world": "MAIN",
       "run_at": "document_start"
     },
     {
+      "matches": ["https://krillion.io/*", "https://playdaily.org/*"],
+      "js": ["content.js"],
+      "css": ["overlay.css"],
+      "run_at": "document_idle"
+    },
+    {
       "matches": ["https://krillion.io/*"],
-      "js": ["content.js", "party-core.js", "party.js"],
+      "js": ["party-core.js", "party.js"],
       "css": ["overlay.css"],
       "run_at": "document_idle"
     }

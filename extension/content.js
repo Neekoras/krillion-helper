@@ -27,7 +27,15 @@
   panel.hidden = true;
   document.documentElement.append(panel);
 
-  const isDaily = () => location.pathname === "/";
+  const PLAYDAILY = location.hostname === "playdaily.org";
+  const isDaily = () => !PLAYDAILY && location.pathname === "/";
+
+  // playdaily.org has other games, and its 1 vs 1 and multiplayer play real people.
+  function inDive() {
+    if (!PLAYDAILY) return document.querySelector(".ds-score-pod") && !document.querySelector(".ds-begin-btn");
+    if (!/^\/krillion\/?$/.test(location.pathname)) return false;
+    return document.querySelector(".kr-stage .kr-prompt") && !document.querySelector(".kr-stage-multi, .kd-stage");
+  }
 
   chrome.storage.local.get(["dailyEnabled", "panelCollapsed"]).then((s) => {
     dailyEnabled = Boolean(s.dailyEnabled);
@@ -132,7 +140,7 @@
   }
 
   function fill(text) {
-    const input = document.querySelector(".ds-input");
+    const input = document.querySelector(PLAYDAILY ? ".kr-input" : ".ds-input");
     if (!input) return;
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
     setter.call(input, text);
@@ -169,14 +177,13 @@
   }
 
   function poll() {
-    const inDive = document.querySelector(".ds-score-pod") && !document.querySelector(".ds-begin-btn");
-    if (!inDive || location.pathname.startsWith("/party")) {
+    if (!inDive() || location.pathname.startsWith("/party")) {
       panel.hidden = true;
       return;
     }
     panel.hidden = false;
     if (isDaily() && !dailyEnabled) return;
-    const prompt = document.querySelector(".ds-card .prompt")?.textContent.trim();
+    const prompt = document.querySelector(PLAYDAILY ? ".kr-prompt" : ".ds-card .prompt")?.textContent.trim();
     if (prompt && prompt !== currentPrompt) onPrompt(prompt);
   }
 

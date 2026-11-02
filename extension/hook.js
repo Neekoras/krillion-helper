@@ -4,15 +4,29 @@
   const realFetch = window.fetch;
   const RealWebSocket = window.WebSocket;
 
+  // playdaily.org deals every prompt up front, then asks for answers by prompt id.
+  const PLAYDAILY_TIERS = ["plankton", "tooclever", "schooler", "rare", "deepcut", "krillion"];
+  const dealt = new Map();
+
   function post(type, payload) {
     window.postMessage({ source: "krillion-helper", type, payload }, location.origin);
   }
 
   async function inspect(url, init, response) {
-    if (/\/submit(\?|$)/.test(url)) {
+    if (/\/submit(\?|$)|\/api\/krillion\/answer(\?|$)/.test(url)) {
       const body = JSON.parse(init?.body ?? "{}");
-      const { accepted, answer, tier, score, correction } = await response.clone().json();
-      post("submit", { guess: body.answer, accepted, answer, tier, score, correction });
+      const { accepted, answer, tier, score, points, correction } = await response.clone().json();
+      post("submit", { guess: body.answer, accepted, answer, tier, score: score ?? points, correction });
+    } else if (/\/api\/krillion\/deal(\?|$)/.test(url)) {
+      const { prompts } = await response.clone().json();
+      for (const { id, text } of prompts ?? []) dealt.set(id, text);
+    } else if (/\/api\/krillion\/answers\?/.test(url)) {
+      const text = dealt.get(decodeURIComponent(/[?&]prompt=([^&]+)/.exec(url)?.[1] ?? ""));
+      const { answers } = await response.clone().json();
+      if (text && answers) {
+        const named = answers.map(([tier, answer]) => ({ answer, tier: PLAYDAILY_TIERS[tier] }));
+        post("reveal", { rounds: [{ text, answers: named }] });
+      }
     } else if (/\/reveal(\?|$)/.test(url)) {
       // The Daily Dive calls these prompts; Unlimited and packs call them rounds.
       const { rounds, prompts } = await response.clone().json();

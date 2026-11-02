@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildSurvivalQuery, getCandidates, parseAnswers } from "../extension/lib/candidates.js";
-import { applyGrades, buildRequest, grade, rankForSurvival } from "../extension/lib/luna.js";
+import { applyGrades, buildRequest, grade, rankForDeepTiers, rankForSurvival } from "../extension/lib/luna.js";
 import { addReveal, applyKnown, diveDepth, merge, promptKey, recordAnswers, summarize } from "../extension/lib/book.js";
 import { describeError } from "../extension/lib/messages.js";
 
@@ -79,6 +79,16 @@ test("applyGrades removes only confident misses and doesn't rank by fit", () => 
     ["France", 1, 0.5, 1],
   ];
   assert.deepEqual(applyGrades(rows.map(([n]) => n), grades(rows)), ["Low fit but listed", "Comoros", "France"]);
+});
+
+test("rankForDeepTiers keeps rewarding obscurity past enthusiast level", () => {
+  const rows = [
+    ["Enthusiast pick", 0.9, 2, 0.9],
+    ["Almost unknown", 0.8, 3, 0.9],
+    ["Famous", 1, 0, 0.9],
+    ["Doesn't fit", 1, 3, 0.01],
+  ];
+  assert.deepEqual(rankForDeepTiers(rows.map(([n]) => n), grades(rows)), ["Almost unknown", "Enthusiast pick", "Famous"]);
 });
 
 test("applyGrades stops rewarding obscurity once only enthusiasts know an answer", () => {
