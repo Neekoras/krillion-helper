@@ -10,6 +10,11 @@ test("parseAnswers removes duplicates and padded names", () => {
   assert.deepEqual(out, ["Sahlab", "Egad"]);
 });
 
+test("parseAnswers keeps real names that repeat a word", () => {
+  const names = ["Hori hori", "Miaow Miaow", "Yo Yo Honey Singh", "Feast of Saint Francis of Assisi"];
+  assert.deepEqual(parseAnswers({ answers: names }), names);
+});
+
 test("parseAnswers accepts a JSON string", () => {
   assert.deepEqual(parseAnswers('{"answers":["Furmint"]}'), ["Furmint"]);
 });

@@ -35,9 +35,13 @@ export function buildSurvivalQuery(prompt) {
 }
 
 // Models sometimes pad lists with doubled words such as "Hominidae hominidae".
+// Real names repeat words too: "Feast of Saint Francis of Assisi" isn't doubled at all,
+// and the doubled ones seen in real lists ("Hori hori", "Miaow Miaow") use short words.
+const MIN_PADDED_WORD = 6;
+
 function looksPadded(name) {
   const words = name.toLowerCase().split(/\s+/);
-  return new Set(words).size < words.length;
+  return words.some((word, i) => word === words[i + 1] && word.length >= MIN_PADDED_WORD);
 }
 
 export function parseAnswers(text) {

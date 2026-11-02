@@ -33,6 +33,20 @@ Learned from the reveal of one finished Unlimited dive (7 prompts, 6,337 answers
 - Long, open lists are mostly Deep Cut (wine 94%). Short, closed lists aren't (coastal countries 6%, Rare 47%), so tier is relative to the list.
 - There is exactly one One in a Krillion per prompt, 1 answer in 82 to 2,465. Each comes with a one-line fun fact and is often only moderately obscure, so it can't be predicted from rarity. Fun facts appear on 18 answers in total, so a fact doesn't guarantee a gem.
 
+Learned from Daily Dive #109 (7 prompts, 28,774 answers) and its pick counts, one day's sample:
+
+- Tier doesn't follow pick counts. Floppy disk had about 67,000 picks and was Deep Cut, while Tia Mowry had 1 and was Rare. It seems to reflect how obvious an answer is for that prompt, not how famous it is.
+- Every prompt had one One in a Krillion, and each was picked by 0.25% to 0.65% of players. That's more than 97% to 100% of that prompt's Deep Cuts, and they ranked 20th to 97th most picked. Gems aren't the rarest answers.
+- 62% of listed answers had no picks at all, and all of them were Deep Cut.
+- Fun facts appeared only on gems. Several facts show the answer qualifies in a surprising way, such as Bone music (bootlegs cut onto X-rays) and Golf hole cutter.
+- Misspellings and old names return `correction` and need a second Enter (Olinguitto to Olinguito, Swaziland to Eswatini). A shortened name can pass straight through (Karakum to Karakum Desert).
+- Too Clever never appeared in a reveal or a submit, so what earns it is still unknown.
+
+Learned from Geography pack 1, which the game labels as beta with possible scoring issues:
+
+- Lists are short and closed (9 to 69 answers), so far fewer are Deep Cut.
+- A prompt can have zero, one or two gems, and fun facts also appear on other tiers. A gem can be a well-known answer with a hidden qualifier, such as Croatia (stars in the crown above its checkerboard).
+
 Learned from the game's Puffer Party client code. The server isn't visible, and rooms can change the default settings:
 
 - Everyone starts with 2 hearts and can hold up to 5. A pop costs the holder a heart, and the last player floating wins.
