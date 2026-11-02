@@ -73,11 +73,12 @@ test("applyGrades favors likely-listed answers over merely obscure ones", () => 
 
 test("applyGrades removes only confident misses and doesn't rank by fit", () => {
   const rows = [
-    ["Saba", 0.95, 3, 0.05],
+    ["Saba", 0.95, 3, 0.01],
+    ["Low fit but listed", 0.95, 3, 0.05],
     ["Comoros", 0.9, 3, 0.2],
     ["France", 1, 0.5, 1],
   ];
-  assert.deepEqual(applyGrades(rows.map(([n]) => n), grades(rows)), ["Comoros", "France"]);
+  assert.deepEqual(applyGrades(rows.map(([n]) => n), grades(rows)), ["Low fit but listed", "Comoros", "France"]);
 });
 
 test("applyGrades stops rewarding obscurity once only enthusiasts know an answer", () => {

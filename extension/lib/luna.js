@@ -3,7 +3,7 @@
 
 const TIMEOUT_MS = 6000;
 const GEM_WEIGHT = 2;
-const MIN_FIT = 0.1;
+const MIN_FIT = 0.02;
 const MIN_SURVIVAL_FIT = 0.5;
 const ENOUGH_OBSCURITY = 2; // "Only enthusiasts would think of this answer"
 
@@ -45,7 +45,8 @@ export function buildRequest(prompt, candidates, { gems = false } = {}) {
   return { model: "gpt-6-luna", input: `Trivia prompt: ${prompt}`, questions };
 }
 
-// The fit check only removes confident misses. Testing showed that ranking by it
+// The fit check only removes confident misses, and its cutoff is low because 40% of
+// answers scored under 0.1 were on the real lists. Testing showed that ranking by it
 // pushes suggestions toward mainstream answers that score lower.
 // Deep Cut is most of a typical answer list, so obscurity stops helping once only
 // enthusiasts would think of an answer. Past that, the chance of being listed decides,

@@ -40,7 +40,7 @@ Learned from Daily Dive #109 (7 prompts, 28,774 answers) and its pick counts, on
 - 62% of listed answers had no picks at all, and all of them were Deep Cut.
 - Fun facts appeared only on gems. Several facts show the answer qualifies in a surprising way, such as Bone music (bootlegs cut onto X-rays) and Golf hole cutter.
 - Misspellings and old names return `correction` and need a second Enter (Olinguitto to Olinguito, Swaziland to Eswatini). A shortened name can pass straight through (Karakum to Karakum Desert).
-- Too Clever never appeared in a reveal or a submit, so what earns it is still unknown.
+- Too Clever didn't appear in this dive. The only example so far is Human for "Name a species of great ape" in Unlimited dive 1, so it may mark an answer that's technically right but a gotcha.
 
 Learned from Geography pack 1, which the game labels as beta with possible scoring issues:
 
