@@ -14,8 +14,9 @@
       const { accepted, answer, tier, score, correction } = await response.clone().json();
       post("submit", { guess: body.answer, accepted, answer, tier, score, correction });
     } else if (/\/reveal(\?|$)/.test(url)) {
-      const { rounds } = await response.clone().json();
-      post("reveal", { rounds });
+      // The Daily Dive calls these prompts; Unlimited and packs call them rounds.
+      const { rounds, prompts } = await response.clone().json();
+      post("reveal", { rounds: rounds ?? prompts ?? [] });
     }
   }
 
