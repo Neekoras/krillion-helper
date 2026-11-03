@@ -15,6 +15,10 @@ test("parseAnswers keeps real names that repeat a word", () => {
   assert.deepEqual(parseAnswers({ answers: names }), names);
 });
 
+test("parseAnswers keeps the whole answers from a reply that was cut off", () => {
+  assert.deepEqual(parseAnswers('{"answers":["Hafnium","Rhenium \\"Re\\"","Osmi'), ["Hafnium", 'Rhenium "Re"']);
+});
+
 test("parseAnswers accepts a JSON string", () => {
   assert.deepEqual(parseAnswers('{"answers":["Furmint"]}'), ["Furmint"]);
 });

@@ -8,11 +8,27 @@ function storeName(name, sender) {
   return new URL(sender.tab?.url ?? "https://krillion.io").hostname === "playdaily.org" ? `${name}:playdaily` : name;
 }
 
+// Dive suggestions by site and prompt, so a prompt fetched ahead of time is ready
+// when it appears. Replies with a note (an error, a missing key) aren't kept.
+const MAX_READY = 30;
+const ready = new Map();
+
+function generateOnce(prompt, sender) {
+  const key = `${storeName("book", sender)} ${promptKey(prompt)}`;
+  if (!ready.has(key)) {
+    const reply = generate(prompt, false, sender);
+    ready.set(key, reply);
+    reply.then((r) => r.note && ready.delete(key), () => ready.delete(key));
+    while (ready.size > MAX_READY) ready.delete(ready.keys().next().value);
+  }
+  return ready.get(key);
+}
+
 async function suggest(prompt, mode, sender) {
   const party = mode === "party";
   const seenName = storeName("seen", sender);
   const { [seenName]: seen = {} } = await chrome.storage.local.get(seenName);
-  const reply = await generate(prompt, party, sender);
+  const reply = await (party ? generate(prompt, true, sender) : generateOnce(prompt, sender));
   return { ...reply, suggestions: applyKnown(seen[promptKey(prompt)], reply.suggestions, { party }) };
 }
 
@@ -71,6 +87,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     suggest(message.prompt, message.mode, sender).then(sendResponse);
     return true;
   }
+  if (message.type === "prefetch") for (const prompt of message.prompts) generateOnce(prompt, sender);
   if (message.type === "reveal") saveInOrder(storeName("book", sender), (book) => addReveal(book, message.rounds));
   if (message.type === "result") saveResult(message, sender);
   if (message.type === "seen") saveInOrder(storeName("seen", sender), (seen) => recordAnswers(seen, message.items));

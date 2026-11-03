@@ -20,6 +20,7 @@
   let collapsed = false;
   let lastResult = null;
   let rejectedCount = 0;
+  let upcoming = [];
 
   const panel = document.createElement("aside");
   panel.id = "krillion-helper";
@@ -149,6 +150,12 @@
   }
 
   async function onPrompt(prompt) {
+    // The first prompt of a dive starts suggestions for the rest of it.
+    if (upcoming.length) {
+      const rest = upcoming.filter((p) => p.trim() !== prompt);
+      upcoming = [];
+      chrome.runtime.sendMessage({ type: "prefetch", prompts: rest }).catch(() => {});
+    }
     currentPrompt = prompt;
     suggestions = [];
     lastResult = null;
@@ -209,7 +216,9 @@
   window.addEventListener("message", (event) => {
     if (event.source !== window || event.data?.source !== "krillion-helper") return;
     const { type, payload } = event.data;
-    if (type === "reveal") {
+    if (type === "prompts") {
+      upcoming = payload.prompts;
+    } else if (type === "reveal") {
       chrome.runtime.sendMessage({ type: "reveal", rounds: payload.rounds });
     } else if (type === "submit") {
       if (payload.accepted) {

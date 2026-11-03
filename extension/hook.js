@@ -34,11 +34,21 @@
     }
   }
 
+  // Every mode loads all of a dive's prompts up front, so suggestions can start early.
+  // Reveals also list prompts, but with their answers attached.
+  async function announcePrompts(response) {
+    const { prompts } = await response.clone().json();
+    if (Array.isArray(prompts) && prompts.length && prompts.every((p) => typeof p?.text === "string" && !p.answers)) {
+      post("prompts", { prompts: prompts.map((p) => p.text) });
+    }
+  }
+
   window.fetch = async function (input, init) {
     const response = await realFetch.call(this, input, init);
     const url = String(input?.url ?? input);
     if (url.includes("/api/") && response.ok) {
       inspect(url, init, response).catch(() => {});
+      announcePrompts(response).catch(() => {});
     }
     return response;
   };

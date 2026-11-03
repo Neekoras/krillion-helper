@@ -55,8 +55,21 @@ function looksPadded(name) {
   return words.some((word, i) => word === words[i + 1] && word.length >= MIN_PADDED_WORD);
 }
 
+// A reply can stop partway through the list. The answers that arrived whole are kept.
+function parseCutOff(text) {
+  const names = [...text.matchAll(/"((?:[^"\\]|\\.)*)"\s*[,\]]/g)].map((m) => JSON.parse(`"${m[1]}"`));
+  return { answers: names };
+}
+
 export function parseAnswers(text) {
-  const parsed = typeof text === "string" ? JSON.parse(text) : text;
+  let parsed = text;
+  if (typeof text === "string") {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = parseCutOff(text);
+    }
+  }
   const seen = new Set();
   const out = [];
   for (const raw of parsed?.answers ?? []) {

@@ -65,11 +65,11 @@ test("hook reads a playdaily.org answer, which calls its score points", async ()
 });
 
 test("hook names a playdaily.org answer list using the dealt prompt", async () => {
-  const [message] = await playback([
+  const messages = await playback([
     ["/api/krillion/deal", { prompts: [{ id: "abc", text: "Name a color" }] }],
     ["/api/krillion/answers?prompt=abc&ticket=t", { answers: [[0, "Red"], [5, "Falu"]] }],
   ]);
-  assert.equal(message.type, "reveal");
+  const message = messages.find((m) => m.type === "reveal");
   assert.equal(message.payload.rounds[0].text, "Name a color");
   assert.deepEqual(
     JSON.parse(JSON.stringify(message.payload.rounds[0].answers)),
@@ -79,4 +79,18 @@ test("hook names a playdaily.org answer list using the dealt prompt", async () =
 
 test("hook skips a playdaily.org answer list for a prompt it didn't see dealt", async () => {
   assert.deepEqual(await playback([["/api/krillion/answers?prompt=abc&ticket=t", { answers: [[0, "Red"]] }]]), []);
+});
+
+test("hook announces a dive's prompts when the game loads them", async () => {
+  const prompts = [{ id: "p1", text: "Name a sauce" }, { id: "p2", text: "Name a tea" }];
+  const messages = await posted("https://krillion.io/api/today", { date: "2026-11-02", prompts });
+  assert.deepEqual(JSON.parse(JSON.stringify(messages)), [
+    { source: "krillion-helper", type: "prompts", payload: { prompts: ["Name a sauce", "Name a tea"] } },
+  ]);
+});
+
+test("hook doesn't announce prompts from a reveal", async () => {
+  const prompts = [{ id: "p1", text: "Name an animal", answers }];
+  const messages = await posted("https://krillion.io/api/reveal?date=2026-11-01", { prompts });
+  assert.equal(messages.filter((m) => m.type === "prompts").length, 0);
 });
