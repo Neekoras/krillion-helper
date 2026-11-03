@@ -64,7 +64,7 @@
     box.setAttribute("role", "status");
     box.append(el("span", "", status.text));
     if (status.needsKey) {
-      const button = el("button", "kh-action", "Add OpenAI key");
+      const button = el("button", "kh-action", "Add Anthropic key");
       button.type = "button";
       button.addEventListener("click", () => chrome.runtime.sendMessage({ type: "openOptions" }));
       box.append(button);

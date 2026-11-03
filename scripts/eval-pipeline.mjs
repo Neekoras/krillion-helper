@@ -1,13 +1,13 @@
 // Scores the extension's real suggestion code against a file of known tier lists.
 // The lists are only an answer key for this test. The extension never reads them.
-// Usage: OPENAI_API_KEY=... node scripts/eval-pipeline.mjs tiers.json
+// Usage: ANTHROPIC_API_KEY=... node scripts/eval-pipeline.mjs tiers.json
 import { readFileSync, writeFileSync } from "node:fs";
 import { getCandidates } from "../extension/lib/candidates.js";
-import { grade } from "../extension/lib/luna.js";
+import { grade } from "../extension/lib/grading.js";
 
 const POINTS = { krillion: 100, deepcut: 85, rare: 60, schooler: 30, tooclever: 15, plankton: 10 };
 const MAX_GUESSES = 8; // Roughly what fits on a 25-second clock.
-const key = process.env.OPENAI_API_KEY;
+const key = process.env.ANTHROPIC_API_KEY;
 const prompts = Object.values(JSON.parse(readFileSync(process.argv[2], "utf8"))).flat();
 
 const normalize = (s) =>

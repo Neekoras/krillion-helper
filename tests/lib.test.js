@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildSurvivalQuery, getCandidates, parseAnswers } from "../extension/lib/candidates.js";
-import { applyGrades, buildRequest, grade, rankForDeepTiers, rankForSurvival } from "../extension/lib/luna.js";
+import { applyGrades, buildRequest, grade, rankForDeepTiers, rankForSurvival, toAnswers } from "../extension/lib/grading.js";
 import { addReveal, applyKnown, diveDepth, merge, promptKey, recordAnswers, summarize } from "../extension/lib/book.js";
 import { describeError } from "../extension/lib/messages.js";
+import { APIConnectionTimeoutError, AuthenticationError, RateLimitError } from "../extension/vendor/anthropic-sdk.js";
 
 test("parseAnswers removes duplicates and padded names", () => {
   const out = parseAnswers({ answers: ["Sahlab", " sahlab ", "Hominidae hominidae", "Egad", ""] });
@@ -23,49 +24,68 @@ test("parseAnswers accepts a JSON string", () => {
   assert.deepEqual(parseAnswers('{"answers":["Furmint"]}'), ["Furmint"]);
 });
 
-test("getCandidates reports API errors", async () => {
-  const fetchFn = async () => ({ ok: false, status: 401 });
-  await assert.rejects(getCandidates("Name a tea", "k", fetchFn), /Luna returned 401/);
-});
+// A Messages API reply as the SDK receives it over fetch.
+const claudeReply = (text, stop_reason = "end_turn") =>
+  new Response(
+    JSON.stringify({
+      id: "msg_test",
+      type: "message",
+      role: "assistant",
+      model: "claude-sonnet-5-5",
+      content: [{ type: "thinking", thinking: "", signature: "s" }, { type: "text", text }],
+      stop_reason,
+      usage: { input_tokens: 1, output_tokens: 1 },
+    }),
+    { status: 200, headers: { "content-type": "application/json" } },
+  );
 
-test("getCandidates reads Responses output and retries an empty list", async () => {
-  const reply = (answers) => ({
-    output: [
-      { type: "reasoning" },
-      { type: "message", content: [{ type: "output_text", text: JSON.stringify({ answers }) }] },
-    ],
+const claudeError = (status, type) =>
+  new Response(JSON.stringify({ type: "error", error: { type, message: "test" } }), {
+    status,
+    headers: { "content-type": "application/json" },
   });
-  const replies = [reply([]), reply(["Sahlab"])];
-  let calls = 0;
-  const urls = [];
-  const fetchFn = async (url) => {
-    urls.push(url);
-    return { ok: true, json: async () => replies[calls++] };
+
+test("getCandidates reports API errors", async () => {
+  const fetchFn = async () => claudeError(401, "authentication_error");
+  await assert.rejects(getCandidates("Name a tea", "k", fetchFn), AuthenticationError);
+});
+
+test("getCandidates reads Claude's answers and retries an empty list", async () => {
+  const replies = [claudeReply('{"answers":[]}'), claudeReply('{"answers":["Sahlab"]}')];
+  const sent = [];
+  const fetchFn = async (url, init) => {
+    sent.push({ url: String(url), init });
+    return replies[sent.length - 1];
   };
-  assert.deepEqual(await getCandidates("Name a tea", "k", fetchFn), ["Sahlab"]);
-  assert.equal(calls, 2);
-  assert.equal(urls[0], "https://api.openai.com/v1/responses");
+  assert.deepEqual(await getCandidates("Name a tea", "secret", fetchFn), ["Sahlab"]);
+  assert.equal(sent.length, 2);
+  assert.equal(sent[0].url, "https://api.anthropic.com/v1/messages");
+  assert.equal(new Headers(sent[0].init.headers).get("authorization"), "Bearer secret");
+  const body = JSON.parse(sent[0].init.body);
+  assert.equal(body.model, "claude-sonnet-5-5");
+  assert.deepEqual(body.thinking, { type: "between_tools" });
+  assert.equal(body.output_config.format.type, "json_schema");
 });
 
-const grades = (rows) =>
-  rows.flatMap(([, listed, score, fits], i) => [
-    { type: "predicate", name: `listed_${i}`, probability: listed },
-    { type: "score", name: `obscure_${i}`, score },
-    { type: "predicate", name: `fits_${i}`, probability: fits },
-  ]);
+const grades = (rows) => toAnswers(Object.fromEntries(rows.map(([, listed, score, fits], i) => [i, [listed, score, fits]])));
 
-test("buildRequest asks three named questions per candidate", () => {
-  const req = buildRequest("Name a tea", ["Sencha", "Gyokuro"]);
-  assert.equal(req.model, "gpt-6-luna");
-  assert.equal(req.questions.length, 6);
-  assert.equal(req.questions[3].name, "listed_1");
-  assert.equal(req.questions[3].type, "predicate");
-  assert.equal(req.questions[1].levels.length, 4);
-  assert.ok(req.questions[1].levels[0].label);
-  assert.equal(req.questions[5].name, "fits_1");
+test("buildRequest numbers a batch from its first candidate and requires every one", () => {
+  const req = buildRequest("Name a tea", ["Sencha", "Gyokuro"], 10);
+  assert.equal(req.model, "claude-sonnet-5-5");
+  assert.deepEqual(req.thinking, { type: "between_tools" });
+  assert.match(req.messages[0].content, /10\. Sencha\n11\. Gyokuro/);
+  assert.deepEqual(req.output_config.format.schema.required, ["10", "11"]);
 });
 
-test("applyGrades favors likely-listed answers over merely obscure ones", () => {
+test("toAnswers skips a candidate whose scores came back incomplete", () => {
+  const answers = toAnswers({ 0: [0.9, 2, 0.8], 1: [0.5] });
+  assert.deepEqual(
+    answers.map((a) => a.name),
+    ["listed_0", "obscure_0", "fits_0"],
+  );
+});
+
+test("applyGrades ranks by obscurity times the chance of being listed", () => {
   const rows = [
     ["Invented tea", 0.3, 3, 0.9],
     ["Gyokuro", 0.95, 2.5, 0.9],
@@ -95,36 +115,12 @@ test("rankForDeepTiers keeps rewarding obscurity past enthusiast level", () => {
   assert.deepEqual(rankForDeepTiers(rows.map(([n]) => n), grades(rows)), ["Almost unknown", "Enthusiast pick", "Famous"]);
 });
 
-test("applyGrades stops rewarding obscurity once only enthusiasts know an answer", () => {
+test("applyGrades keeps rewarding obscurity past enthusiast level", () => {
   const rows = [
+    ["Enthusiast pick", 0.8, 2, 0.9],
     ["Almost unknown", 0.7, 3, 0.9],
-    ["Enthusiast pick", 0.9, 2, 0.9],
   ];
-  assert.deepEqual(applyGrades(rows.map(([n]) => n), grades(rows)), ["Enthusiast pick", "Almost unknown"]);
-});
-
-test("applyGrades lifts likely gems above equally obscure answers", () => {
-  const candidates = ["Plain pick", "Story pick"];
-  const answers = [
-    ...grades([["Plain pick", 0.9, 2, 0.9], ["Story pick", 0.9, 2, 0.9]]),
-    { type: "predicate", name: "gem_0", probability: 0.1 },
-    { type: "predicate", name: "gem_1", probability: 0.8 },
-  ];
-  assert.deepEqual(applyGrades(candidates, answers), ["Story pick", "Plain pick"]);
-});
-
-test("only dive ranking pays for the gem question", async () => {
-  const sentNames = async (rank) => {
-    let body;
-    const fetchFn = async (_url, init) => {
-      body = JSON.parse(init.body);
-      return { ok: true, json: async () => ({ answers: [] }) };
-    };
-    await grade("Name a tea", ["Sencha"], "k", fetchFn, rank);
-    return body.questions.map((q) => q.name);
-  };
-  assert.deepEqual(await sentNames(applyGrades), ["listed_0", "obscure_0", "fits_0", "gem_0"]);
-  assert.deepEqual(await sentNames(rankForSurvival), ["listed_0", "obscure_0", "fits_0"]);
+  assert.deepEqual(applyGrades(rows.map(([n]) => n), grades(rows)), ["Almost unknown", "Enthusiast pick"]);
 });
 
 test("rankForSurvival puts safe answers ahead of rare risky ones", () => {
@@ -157,48 +153,42 @@ test("getCandidates can ask for safe answers", async () => {
   let body;
   const fetchFn = async (_url, init) => {
     body = JSON.parse(init.body);
-    return { ok: true, json: async () => ({ output: [{ content: [{ type: "output_text", text: '{"answers":["Green tea"]}' }] }] }) };
+    return claudeReply('{"answers":["Green tea"]}');
   };
   await getCandidates("Name a tea", "k", fetchFn, buildSurvivalQuery);
-  assert.equal(body.input, buildSurvivalQuery("Name a tea"));
-  assert.doesNotMatch(body.input, /would not think/);
+  assert.equal(body.messages[0].content, buildSurvivalQuery("Name a tea"));
+  assert.doesNotMatch(body.messages[0].content, /would not think/);
 });
 
-test("applyGrades removes a candidate whose fit question was refused", () => {
-  const answers = [
-    { type: "predicate", name: "listed_0", probability: 1 },
-    { type: "score", name: "obscure_0", score: 3 },
-    { type: "refusal", name: "fits_0" },
-    { type: "predicate", name: "listed_1", probability: 0.5 },
-    { type: "score", name: "obscure_1", score: 1 },
-    { type: "predicate", name: "fits_1", probability: 0.9 },
-  ];
-  assert.deepEqual(applyGrades(["Rude word", "Chai"], answers), ["Chai"]);
+test("applyGrades removes a candidate Claude didn't grade", () => {
+  const answers = toAnswers({ 1: [0.5, 1, 0.9] });
+  assert.deepEqual(applyGrades(["Skipped", "Chai"], answers), ["Chai"]);
 });
 
-test("grade sends the documented request to the Decisions API", async () => {
-  let sent;
-  const fetchFn = async (url, init) => {
-    sent = { url, init };
-    return {
-      ok: true,
-      json: async () => ({
-        answers: [
-          { type: "predicate", name: "listed_0", probability: 1 },
-          { type: "score", name: "obscure_0", score: 3 },
-          { type: "predicate", name: "fits_0", probability: 1 },
-        ],
-      }),
-    };
+test("grade sends one request per batch of ten and ranks every batch together", async () => {
+  const candidates = Array.from({ length: 12 }, (_, i) => `Tea ${i}`);
+  const bodies = [];
+  const fetchFn = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    bodies.push(body);
+    const numbers = body.output_config.format.schema.required;
+    return claudeReply(JSON.stringify(Object.fromEntries(numbers.map((n) => [n, [0.9, Number(n) === 11 ? 3 : 1, 0.9]]))));
   };
-  assert.deepEqual(await grade("Name a tea", ["Kuzuyu"], "secret", fetchFn), ["Kuzuyu"]);
-  assert.equal(sent.url, "https://api.openai.com/v1/decisions");
-  assert.equal(sent.init.headers.Authorization, "Bearer secret");
+  const order = await grade("Name a tea", candidates, "k", fetchFn);
+  assert.equal(bodies.length, 2);
+  assert.deepEqual(bodies[1].output_config.format.schema.required, ["10", "11"]);
+  assert.equal(order[0], "Tea 11");
+  assert.equal(order.length, 12);
 });
 
-test("grade reports Decisions API errors", async () => {
-  const fetchFn = async () => ({ ok: false, status: 429 });
-  await assert.rejects(grade("Name a tea", ["Kuzuyu"], "k", fetchFn), /Luna returned 429/);
+test("grade fails when Claude stops before finishing a batch", async () => {
+  const fetchFn = async () => claudeReply('{"0":[0.9,', "max_tokens");
+  await assert.rejects(grade("Name a tea", ["Kuzuyu"], "k", fetchFn), /stopped early/);
+});
+
+test("grade reports API errors", async () => {
+  const fetchFn = async () => claudeError(429, "rate_limit_error");
+  await assert.rejects(grade("Name a tea", ["Kuzuyu"], "k", fetchFn), RateLimitError);
 });
 
 const rounds = [
@@ -255,12 +245,13 @@ test("diveDepth matches the game's 7,000m floor", () => {
   assert.equal(diveDepth(85), 5950);
 });
 
-test("describeError tells the player what to do", () => {
-  assert.match(describeError(new Error("Luna returned 401")), /rejected your key/);
-  assert.match(describeError(new Error("Luna returned 429")), /out of credit/);
-  assert.match(describeError(new Error("The operation was aborted due to timeout")), /too long/);
-  assert.match(describeError(new TypeError("Failed to fetch")), /Can't reach/);
-  assert.match(describeError(new Error("Luna returned 500")), /returned an error/);
+test("describeError tells the player what to do", async () => {
+  const errorFrom = (fetchFn) => getCandidates("Name a tea", "k", fetchFn).catch((err) => err);
+  assert.match(describeError(await errorFrom(async () => claudeError(401, "authentication_error"))), /rejected your key/);
+  assert.match(describeError(await errorFrom(async () => claudeError(429, "rate_limit_error"))), /too fast/);
+  assert.match(describeError(await errorFrom(async () => { throw new TypeError("Failed to fetch"); })), /Can't reach/);
+  assert.match(describeError(await errorFrom(async () => claudeError(500, "api_error"))), /returned an error/);
+  assert.match(describeError(new APIConnectionTimeoutError()), /too long/);
 });
 
 await import("../extension/party-core.js");

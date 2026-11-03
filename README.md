@@ -6,11 +6,11 @@ A personal Chrome extension that suggests obscure answers while you play [Krilli
 
 1. Open `chrome://extensions` and turn on Developer mode.
 2. Click **Load unpacked** and choose the `extension` folder.
-3. Open the extension's **Details**, then **Extension options**, and paste your OpenAI key.
+3. Open the extension's **Details**, then **Extension options**, and paste your Anthropic API key.
 
 ## How it works
 
-- **Suggestions:** when a prompt appears, GPT-6 Luna generates up to 40 obscure answers and the Decisions API ranks them by obscurity (capped at enthusiast level) plus gem potential, times the squared chance a reference list includes them. It also removes answers it's confident don't fit the prompt. The panel shows the top six, and when one is rejected the next moves up. Click one or press Alt + its number to fill the answer box, then press Enter yourself.
+- **Suggestions:** when a prompt appears, Claude Sonnet 5.5, with thinking off for speed, writes up to 40 obscure answers, then grades them in parallel batches of ten. They're ranked by obscurity times the chance a reference list includes them, and answers it's confident don't fit the prompt are removed. Once a dive starts, the other prompts are prepared in the background. The panel shows the top six, and when one is rejected the next moves up. Click one or press Alt + its number to fill the answer box, then press Enter yourself.
 - **Answer book:** when you finish a dive, the game shows that dive's answers. The extension saves the top answer and some Deep Cuts for each prompt and shows them first if the prompt comes up again.
 - **Known answers:** the extension remembers, per question, the answers it sees during play: tiers for accepted answers, and which ones were rejected. If a question comes up again, known answers show their tier and known misses are left out. This only uses what the game already shows you, and it never looks up answer lists.
 - **Where it runs:** Unlimited, Archive and themed packs. On the Daily Dive, suggestions stay off until you turn them on from the panel. In Puffer Party, it runs in hosted public and private rooms during a round. Rated and Quick Play stay off.
@@ -75,4 +75,6 @@ Learned from six Classic dives on playdaily.org, a separate game with different 
 npm test
 ```
 
-With `OPENAI_API_KEY` set, `node scripts/eval-pipeline.mjs <tiers.json>` scores the suggestion code against a file of known tier lists.
+The extension loads the Anthropic SDK from `extension/vendor/anthropic-sdk.js`. After changing the SDK version in `package.json`, rebuild it with `npm run build:sdk`.
+
+With `ANTHROPIC_API_KEY` set, `node scripts/eval-pipeline.mjs <tiers.json>` scores the suggestion code against a file of known tier lists.

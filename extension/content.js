@@ -79,7 +79,7 @@
     box.setAttribute("role", "status");
     box.append(el("span", "", status.text));
     if (status.needsKey) {
-      const button = el("button", "kh-action", "Add OpenAI key");
+      const button = el("button", "kh-action", "Add Anthropic key");
       button.type = "button";
       button.addEventListener("click", () => chrome.runtime.sendMessage({ type: "openOptions" }));
       box.append(button);
@@ -150,21 +150,22 @@
   }
 
   async function onPrompt(prompt) {
-    // The first prompt of a dive starts suggestions for the rest of it.
-    if (upcoming.length) {
-      const rest = upcoming.filter((p) => p.trim() !== prompt);
-      upcoming = [];
-      chrome.runtime.sendMessage({ type: "prefetch", prompts: rest }).catch(() => {});
-    }
     currentPrompt = prompt;
     suggestions = [];
     lastResult = null;
     rejectedCount = 0;
     status = { text: "Sounding for answers", searching: true };
     render();
+    const asked = chrome.runtime.sendMessage({ type: "suggest", prompt });
+    // The first prompt of a dive starts suggestions for the rest of it, after its own.
+    if (upcoming.length) {
+      const rest = upcoming.filter((p) => p.trim() !== prompt);
+      upcoming = [];
+      chrome.runtime.sendMessage({ type: "prefetch", prompts: rest }).catch(() => {});
+    }
     let reply;
     try {
-      reply = await chrome.runtime.sendMessage({ type: "suggest", prompt });
+      reply = await asked;
     } catch {
       // Reloading the extension disconnects tabs that were already open.
       status = { text: "Lost connection to the extension. Refresh this page." };

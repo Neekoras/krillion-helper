@@ -1,6 +1,7 @@
-// Asks GPT-6 Luna for obscure, real answers to a Krillion prompt.
+// Asks Claude for obscure, real answers to a Krillion prompt.
+import { MODEL, NO_THINKING, createClient, replyText } from "./claude.js";
 
-const TIMEOUT_MS = 12000;
+const TIMEOUT_MS = 30000;
 
 const SCHEMA = {
   type: "object",
@@ -83,33 +84,23 @@ export function parseAnswers(text) {
   return out;
 }
 
-function outputText(data) {
-  for (const item of data.output ?? []) {
-    for (const part of item.content ?? []) {
-      if (part.type === "output_text") return part.text;
-    }
-  }
-  return "{}";
-}
-
-async function ask(prompt, openaiKey, fetchFn, query) {
-  const res = await fetchFn("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${openaiKey}` },
-    body: JSON.stringify({
-      model: "gpt-6-luna",
-      input: query(prompt),
-      reasoning: { effort: "none" },
-      text: { format: { type: "json_schema", name: "answers", strict: true, schema: SCHEMA } },
-    }),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
-  if (!res.ok) throw new Error(`Luna returned ${res.status}`);
-  return parseAnswers(outputText(await res.json()));
+// Listing names needs no reasoning, so thinking stays off to keep the list fast.
+async function ask(prompt, apiKey, fetchFn, query) {
+  const message = await createClient(apiKey, fetchFn).messages.create(
+    {
+      model: MODEL,
+      max_tokens: 16000,
+      thinking: NO_THINKING,
+      output_config: { effort: "low", format: { type: "json_schema", schema: SCHEMA } },
+      messages: [{ role: "user", content: query(prompt) }],
+    },
+    { timeout: TIMEOUT_MS },
+  );
+  return parseAnswers(replyText(message) || "{}");
 }
 
 // An empty reply gets one retry.
-export async function getCandidates(prompt, openaiKey, fetchFn = fetch, query = buildQuery) {
-  const first = await ask(prompt, openaiKey, fetchFn, query);
-  return first.length ? first : ask(prompt, openaiKey, fetchFn, query);
+export async function getCandidates(prompt, apiKey, fetchFn = fetch, query = buildQuery) {
+  const first = await ask(prompt, apiKey, fetchFn, query);
+  return first.length ? first : ask(prompt, apiKey, fetchFn, query);
 }

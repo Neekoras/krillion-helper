@@ -1,56 +1,66 @@
-// Uses OpenAI's Decisions API to rank candidates the way the game rewards them.
+// Asks Claude to grade each candidate, then ranks them the way the game rewards them.
 // Being accepted matters most, so likely-listed answers outrank merely obscure ones.
+import { MODEL, NO_THINKING, createClient, replyText } from "./claude.js";
 
-const TIMEOUT_MS = 6000;
-const GEM_WEIGHT = 2;
+const TIMEOUT_MS = 15000;
 const MIN_FIT = 0.02;
 const MIN_SURVIVAL_FIT = 0.5;
-const ENOUGH_OBSCURITY = 2; // "Only enthusiasts would think of this answer"
 
-const OBSCURITY_LEVELS = [
-  { label: "Almost everyone would think of this answer" },
-  { label: "Many people would think of this answer" },
-  { label: "Only enthusiasts would think of this answer" },
-  { label: "Almost nobody would think of this answer" },
-];
+// Each candidate gets the questions the ranking reads: whether a reference list includes
+// it, how obscure it is (0 to 3) and whether it strictly fits. Answers come back as
+// short number lists keyed by candidate number, because output length sets the wait.
+const BATCH_SIZE = 10;
 
-export function buildRequest(prompt, candidates, { gems = false } = {}) {
-  const questions = candidates.flatMap((name, i) => [
-    {
-      type: "predicate",
-      name: `listed_${i}`,
-      instructions: `A thorough reference list of answers to the trivia prompt, compiled from Wikipedia, dictionaries and encyclopedias, would include "${name}" under that name.`,
+export function buildRequest(prompt, candidates, first = 0) {
+  const numbers = candidates.map((_, i) => String(first + i));
+  const content =
+    `Trivia prompt: ${prompt}\n\nCandidate answers:\n` +
+    candidates.map((name, i) => `${numbers[i]}. ${name}`).join("\n") +
+    `\n\nFor each candidate number, give [listed, obscure, fits]:\n` +
+    `- listed: the probability (0 to 1) that a thorough reference list of answers to the prompt, compiled from Wikipedia, dictionaries and encyclopedias, includes it under that name.\n` +
+    `- obscure: how obscure it is as an answer, from 0 to 3. 0: almost everyone would think of it. 1: many people would. 2: only enthusiasts would. 3: almost nobody would. Fractions are fine.\n` +
+    `- fits: the probability (0 to 1) that, taking every word of the prompt strictly and in its most ordinary meaning, it clearly meets every condition. Borderline, disputed or technically-related cases do not count.\n`;
+  const scores = { type: "array", items: { type: "number" } };
+  return {
+    model: MODEL,
+    max_tokens: 16000,
+    thinking: NO_THINKING,
+    output_config: {
+      effort: "low",
+      format: {
+        type: "json_schema",
+        schema: {
+          type: "object",
+          properties: Object.fromEntries(numbers.map((n) => [n, scores])),
+          required: numbers,
+          additionalProperties: false,
+        },
+      },
     },
-    {
-      type: "score",
-      name: `obscure_${i}`,
-      instructions: `How obscure is "${name}" as an answer to the trivia prompt?`,
-      levels: OBSCURITY_LEVELS,
-    },
-    {
-      type: "predicate",
-      name: `fits_${i}`,
-      instructions: `Taking every word of the trivia prompt strictly and in its most ordinary meaning, "${name}" clearly meets every condition in the prompt. Borderline, disputed or technically-related cases do not count.`,
-    },
-    ...(gems
-      ? [
-          {
-            type: "predicate",
-            name: `gem_${i}`,
-            instructions: `A trivia game's host, picking the single most satisfying answer to the prompt, would choose "${name}": some players could actually know it, and one vivid, surprising fact makes it fun to land on.`,
-          },
-        ]
-      : []),
-  ]);
-  return { model: "gpt-6-luna", input: `Trivia prompt: ${prompt}`, questions };
+    messages: [{ role: "user", content }],
+  };
+}
+
+// Turns Claude's grades into one entry per question, the shape the rankers read.
+// A score list of the wrong length is skipped, so that candidate counts as unlikely to fit.
+export function toAnswers(grades) {
+  return Object.entries(grades).flatMap(([i, scores]) => {
+    if (scores.length !== 3) return [];
+    const [listed, obscure, fits] = scores;
+    return [
+      { name: `listed_${i}`, probability: listed },
+      { name: `obscure_${i}`, score: obscure },
+      { name: `fits_${i}`, probability: fits },
+    ];
+  });
 }
 
 // The fit check only removes confident misses, and its cutoff is low because 40% of
 // answers scored under 0.1 were on the real lists. Testing showed that ranking by it
 // pushes suggestions toward mainstream answers that score lower.
-// Deep Cut is most of a typical answer list, so obscurity stops helping once only
-// enthusiasts would think of an answer. Past that, the chance of being listed decides,
-// along with gem potential, since each prompt's top answer is hand-picked for being fun.
+// Claude rates most of its own candidates 2 to 2.5 for obscurity, so obscurity keeps
+// counting all the way up. Replaying saved dives, obscurity times the chance of being
+// listed scored best, about as well as the earlier OpenAI version.
 export function applyGrades(candidates, answers) {
   const byName = new Map(answers.map((a) => [a.name, a]));
   return candidates
@@ -58,9 +68,7 @@ export function applyGrades(candidates, answers) {
       const fit = byName.get(`fits_${i}`);
       const listed = byName.get(`listed_${i}`)?.probability ?? 0;
       const obscure = byName.get(`obscure_${i}`)?.score ?? 0;
-      const gem = byName.get(`gem_${i}`)?.probability ?? 0;
-      const value = Math.min(obscure, ENOUGH_OBSCURITY) + GEM_WEIGHT * gem;
-      return { name, fits: fit?.probability ?? 0, rank: value * listed ** 2, i };
+      return { name, fits: fit?.probability ?? 0, rank: obscure * listed, i };
     })
     .filter((c) => c.fits >= MIN_FIT)
     .sort((a, b) => b.rank - a.rank || a.i - b.i)
@@ -100,14 +108,18 @@ export function rankForSurvival(candidates, answers) {
     .map((c) => c.name);
 }
 
-export async function grade(prompt, candidates, openaiKey, fetchFn = fetch, rank = applyGrades) {
-  const res = await fetchFn("https://api.openai.com/v1/decisions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${openaiKey}` },
-    body: JSON.stringify(buildRequest(prompt, candidates, { gems: rank === applyGrades })),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
-  if (!res.ok) throw new Error(`Luna returned ${res.status}`);
-  const data = await res.json();
-  return rank(candidates, data.answers);
+// Batches grade in parallel, so a long list takes about as long as a short one.
+export async function grade(prompt, candidates, apiKey, fetchFn = fetch, rank = applyGrades) {
+  const client = createClient(apiKey, fetchFn);
+  const batches = [];
+  for (let first = 0; first < candidates.length; first += BATCH_SIZE) {
+    const request = buildRequest(prompt, candidates.slice(first, first + BATCH_SIZE), first);
+    batches.push(
+      client.messages.create(request, { timeout: TIMEOUT_MS }).then((message) => {
+        if (message.stop_reason !== "end_turn") throw new Error(`Grading stopped early: ${message.stop_reason}`);
+        return toAnswers(JSON.parse(replyText(message)));
+      }),
+    );
+  }
+  return rank(candidates, (await Promise.all(batches)).flat());
 }

@@ -1,5 +1,5 @@
 import { buildDeepQuery, buildQuery, buildSurvivalQuery, getCandidates } from "./lib/candidates.js";
-import { applyGrades, grade, rankForDeepTiers, rankForSurvival } from "./lib/luna.js";
+import { applyGrades, grade, rankForDeepTiers, rankForSurvival } from "./lib/grading.js";
 import { addReveal, applyKnown, merge, promptKey, recordAnswers } from "./lib/book.js";
 import { describeError } from "./lib/messages.js";
 
@@ -34,7 +34,7 @@ async function suggest(prompt, mode, sender) {
 
 async function generate(prompt, party, sender) {
   const bookName = storeName("book", sender);
-  const { openaiKey, [bookName]: book = {} } = await chrome.storage.local.get(["openaiKey", bookName]);
+  const { anthropicKey, [bookName]: book = {} } = await chrome.storage.local.get(["anthropicKey", bookName]);
   const entry = book[promptKey(prompt)];
   const deep = bookName !== "book";
   const query = party ? buildSurvivalQuery : deep ? buildDeepQuery : buildQuery;
@@ -42,20 +42,20 @@ async function generate(prompt, party, sender) {
 
   // A room uses answers up, so Puffer Party always needs more than the book holds.
   if (!party && entry?.gems?.length) return { suggestions: merge(entry, []), note: "Seen before. From your answer book." };
-  if (!openaiKey) {
-    return { suggestions: merge(entry, []), note: "Suggestions need an OpenAI key.", needsKey: true };
+  if (!anthropicKey) {
+    return { suggestions: merge(entry, []), note: "Suggestions need an Anthropic key.", needsKey: true };
   }
 
   let candidates;
   try {
-    candidates = await getCandidates(prompt, openaiKey, fetch, query);
+    candidates = await getCandidates(prompt, anthropicKey, fetch, query);
   } catch (err) {
     return { suggestions: merge(entry, []), note: describeError(err) };
   }
   if (!candidates.length) return { suggestions: merge(entry, []) };
 
   try {
-    const graded = await grade(prompt, candidates, openaiKey, fetch, rank);
+    const graded = await grade(prompt, candidates, anthropicKey, fetch, rank);
     return { suggestions: merge(entry, graded.length ? graded : candidates, Infinity) };
   } catch {
     return { suggestions: merge(entry, candidates, Infinity), note: "Couldn't rank these, so check them first." };

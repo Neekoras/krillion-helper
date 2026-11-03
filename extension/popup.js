@@ -12,7 +12,7 @@ const BANDS = [
 const PIXELS_PER_METER = 0.05;
 const meters = (n) => `${n.toLocaleString("en-US")}m`;
 
-const stored = await chrome.storage.local.get(["openaiKey", "dailyEnabled", "results", "book"]);
+const stored = await chrome.storage.local.get(["anthropicKey", "dailyEnabled", "results", "book"]);
 const stats = summarize(stored.results ?? []);
 
 const paceEl = document.getElementById("pace");
@@ -64,7 +64,7 @@ column.setAttribute(
   BANDS.map((b) => `${b.name}: ${stats.tiers[b.tier] ?? 0}`).join(", "),
 );
 
-document.getElementById("key-warning").hidden = Boolean(stored.openaiKey);
+document.getElementById("key-warning").hidden = Boolean(stored.anthropicKey);
 document.getElementById("add-key").addEventListener("click", () => chrome.runtime.openOptionsPage());
 document.getElementById("options").addEventListener("click", () => chrome.runtime.openOptionsPage());
 

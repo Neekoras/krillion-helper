@@ -4,7 +4,7 @@
   "version": "0.5.0",
   "description": "Suggests obscure answers for Krillion and keeps a book of the answers revealed after your dives.",
   "permissions": ["storage"],
-  "host_permissions": ["https://api.openai.com/*"],
+  "host_permissions": ["https://api.anthropic.com/*"],
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
