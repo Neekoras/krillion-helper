@@ -24,15 +24,15 @@ function generateOnce(prompt, sender) {
   return ready.get(key);
 }
 
-async function suggest(prompt, mode, sender) {
+async function suggest(prompt, mode, sender, exclude = []) {
   const party = mode === "party";
   const seenName = storeName("seen", sender);
   const { [seenName]: seen = {} } = await chrome.storage.local.get(seenName);
-  const reply = await (party ? generate(prompt, true, sender) : generateOnce(prompt, sender));
+  const reply = await (party ? generate(prompt, true, sender, exclude) : generateOnce(prompt, sender));
   return { ...reply, suggestions: applyKnown(seen[promptKey(prompt)], reply.suggestions, { party }) };
 }
 
-async function generate(prompt, party, sender) {
+async function generate(prompt, party, sender, exclude = []) {
   const bookName = storeName("book", sender);
   const { anthropicKey, [bookName]: book = {} } = await chrome.storage.local.get(["anthropicKey", bookName]);
   const entry = book[promptKey(prompt)];
@@ -48,7 +48,7 @@ async function generate(prompt, party, sender) {
 
   let candidates;
   try {
-    candidates = await getCandidates(prompt, anthropicKey, fetch, query);
+    candidates = await getCandidates(prompt, anthropicKey, fetch, query, exclude);
   } catch (err) {
     return { suggestions: merge(entry, []), note: describeError(err) };
   }
@@ -84,7 +84,7 @@ function saveInOrder(name, change) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "suggest") {
-    suggest(message.prompt, message.mode, sender).then(sendResponse);
+    suggest(message.prompt, message.mode, sender, message.exclude).then(sendResponse);
     return true;
   }
   if (message.type === "prefetch") for (const prompt of message.prompts) generateOnce(prompt, sender);

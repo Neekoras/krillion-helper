@@ -36,13 +36,19 @@ export function buildDeepQuery(prompt) {
 
 // Puffer Party only needs an accepted answer before the puffer pops, and everyone
 // in the room uses answers up, so this asks for safe answers and plenty of them.
-export function buildSurvivalQuery(prompt) {
-  return (
+// Later in a category it also lists the answers already used, so it finds new ones.
+export function buildSurvivalQuery(prompt, exclude = []) {
+  const query =
     `Party game category: "${prompt}". List 40 answers that a broad reference list ` +
     `of answers would certainly include, starting with the ones you are most sure ` +
     `of. Mix very common answers with moderately well-known ones. Use the plain ` +
     `name most people would type, with no added words or punctuation. Every answer ` +
-    `must clearly satisfy the category in its most ordinary meaning.`
+    `must clearly satisfy the category in its most ordinary meaning.`;
+  if (!exclude.length) return query;
+  return (
+    `${query} These answers are already used, so leave them out and give different ` +
+    `ones. If there are fewer than 40 left, list only the ones that remain:\n` +
+    exclude.join("\n")
   );
 }
 
@@ -84,19 +90,23 @@ export function parseAnswers(text) {
   return out;
 }
 
+// Compares names loosely, so "São Tomé" and "sao tome" count as the same answer.
+const sameName = (name) => name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
 // Listing names needs no reasoning, so thinking stays off to keep the list fast.
-async function ask(prompt, apiKey, fetchFn, query) {
+async function ask(prompt, apiKey, fetchFn, query, exclude) {
   const message = await createClient(apiKey, fetchFn).messages.create(
     {
       model: MODEL,
       max_tokens: 16000,
       thinking: NO_THINKING,
       output_config: { effort: "low", format: { type: "json_schema", schema: SCHEMA } },
-      messages: [{ role: "user", content: query(prompt) }],
+      messages: [{ role: "user", content: query(prompt, exclude) }],
     },
     { timeout: TIMEOUT_MS },
   );
-  return parseAnswers(replyText(message) || "{}");
+  const used = new Set(exclude.map(sameName));
+  return parseAnswers(replyText(message) || "{}").filter((name) => !used.has(sameName(name)));
 }
 
 // A prompt with a short, closed list, such as the actors who have played Bond, leaves
@@ -104,13 +114,13 @@ async function ask(prompt, apiKey, fetchFn, query) {
 // list out, and grading still puts the rarest of them first.
 const MIN_CANDIDATES = 10;
 
-// An empty reply gets one retry.
-export async function getCandidates(prompt, apiKey, fetchFn = fetch, query = buildQuery) {
-  let found = await ask(prompt, apiKey, fetchFn, query);
-  if (!found.length) found = await ask(prompt, apiKey, fetchFn, query);
+// An empty reply gets one retry. Answers in exclude are never returned.
+export async function getCandidates(prompt, apiKey, fetchFn = fetch, query = buildQuery, exclude = []) {
+  let found = await ask(prompt, apiKey, fetchFn, query, exclude);
+  if (!found.length) found = await ask(prompt, apiKey, fetchFn, query, exclude);
   if (found.length >= MIN_CANDIDATES || query === buildSurvivalQuery) return found;
   try {
-    return parseAnswers({ answers: [...found, ...(await ask(prompt, apiKey, fetchFn, buildSurvivalQuery))] });
+    return parseAnswers({ answers: [...found, ...(await ask(prompt, apiKey, fetchFn, buildSurvivalQuery, exclude))] });
   } catch (err) {
     if (found.length) return found;
     throw err;

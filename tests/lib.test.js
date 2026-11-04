@@ -188,6 +188,22 @@ test("getCandidates can ask for safe answers", async () => {
   assert.doesNotMatch(body.messages[0].content, /would not think/);
 });
 
+test("getCandidates asks for answers not used yet and never returns one", async () => {
+  let body;
+  const fetchFn = async (_url, init) => {
+    body = JSON.parse(init.body);
+    return claudeReply('{"answers":["Sencha","Hōji Cha","Gyokuro"]}');
+  };
+  const out = await getCandidates("Name a tea", "k", fetchFn, buildSurvivalQuery, ["sencha", "hoji cha"]);
+  assert.deepEqual(out, ["Gyokuro"]);
+  assert.match(body.messages[0].content, /already used[\s\S]*\nsencha\nhoji cha$/);
+});
+
+test("buildSurvivalQuery mentions used answers only when there are some", () => {
+  assert.equal(buildSurvivalQuery("Name a tea", []), buildSurvivalQuery("Name a tea"));
+  assert.doesNotMatch(buildSurvivalQuery("Name a tea"), /already used/);
+});
+
 test("applyGrades removes a candidate Claude didn't grade", () => {
   const answers = toAnswers({ 1: [0.5, 1, 0.9] });
   assert.deepEqual(applyGrades(["Skipped", "Chai"], answers), ["Chai"]);
@@ -283,7 +299,7 @@ test("describeError tells the player what to do", async () => {
 });
 
 await import("../extension/party-core.js");
-const { createRoom, applyMessage, observedAnswers, isActive, remaining, normalizeAnswer } = globalThis.KrillionParty;
+const { createRoom, applyMessage, observedAnswers, isActive, remaining, normalizeAnswer, used, addFresh } = globalThis.KrillionParty;
 const roundFields = { phase: "round", holderId: "a", category: { index: 1, text: "Name a tea", threshold: 11, accepted: 0 } };
 const snap = (isPrivate, fields = roundFields) => ({ t: "snap", room: { settings: { isPrivate }, players: [], events: [], ...fields } });
 
@@ -320,6 +336,15 @@ test("party removes answers accepted or missed by anyone", () => {
   });
   const left = remaining(room, [{ name: "gyokuro" }, { name: "Hoji Cha" }, { name: "Sencha" }]);
   assert.deepEqual(left, [{ name: "Sencha" }]);
+});
+
+test("party asks Claude to skip everything suggested or said, and adds only new answers", () => {
+  const room = applyMessage(createRoom(), snap(true));
+  applyMessage(room, { t: "patch", patch: { events: [{ kind: "pass", answer: "Gyokuro" }] } });
+  const suggestions = [{ name: "Sencha" }, { name: "Gyokuro" }];
+  assert.deepEqual(used(room, suggestions).sort(), ["gyokuro", "sencha"]);
+  const incoming = [{ name: "sencha" }, { name: "GYOKURO" }, { name: "Kukicha" }, { name: "kukicha" }];
+  assert.deepEqual(addFresh(room, suggestions, incoming), [{ name: "Kukicha" }]);
 });
 
 test("party resets what was said when the category changes", () => {

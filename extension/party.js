@@ -1,7 +1,8 @@
 // The Puffer Party panel. It appears during a round in hosted rooms and never submits for you.
 (() => {
-  const { createRoom, applyMessage, observedAnswers, isActive, remaining } = globalThis.KrillionParty;
+  const { createRoom, applyMessage, observedAnswers, isActive, remaining, used, addFresh } = globalThis.KrillionParty;
   const VISIBLE = 6;
+  const RETRY_MS = 10000;
   const TIER_LABEL = {
     krillion: "One in a Krillion",
     deepcut: "Deep Cut",
@@ -16,6 +17,10 @@
   let suggestions = [];
   let status = null; // { text, needsKey?, searching? }
   let collapsed = false;
+  // The room uses answers up, so the list keeps being topped up during a category.
+  let fetchingMore = false;
+  let exhausted = false; // Claude had nothing new for this category
+  let retryAt = 0;
 
   const panel = document.createElement("aside");
   panel.id = "krillion-helper";
@@ -101,9 +106,10 @@
       left.slice(0, VISIBLE).forEach((s, i) => list.append(renderItem(s, i)));
       panel.append(list);
       panel.append(el("p", "kh-hint", "Alt + number fills it. Enter passes the puffer."));
-    } else if (!status && suggestions.length) {
+    } else if (!status && suggestions.length && !fetchingMore) {
       panel.append(renderOutOfAnswers());
     }
+    if (fetchingMore) panel.append(el("p", "kh-hint", "Finding more answers…"));
     if (room.said.size) panel.append(el("p", "kh-hint", `${room.said.size} already tried this category.`));
   }
 
@@ -116,6 +122,9 @@
   async function requestSuggestions(category) {
     requested = category;
     suggestions = [];
+    fetchingMore = false;
+    exhausted = false;
+    retryAt = 0;
     status = { text: "Sounding for answers", searching: true };
     render();
     let reply;
@@ -129,10 +138,46 @@
       return;
     }
     if (category !== requested) return;
-    suggestions = reply?.suggestions ?? [];
-    if (reply?.note) status = { text: reply.note, needsKey: reply.needsKey };
-    else status = suggestions.length ? null : { text: "No answers found for this category." };
+    suggestions = addFresh(room, [], reply?.suggestions ?? []);
+    if (reply?.note) {
+      status = { text: reply.note, needsKey: reply.needsKey };
+      retryAt = Date.now() + RETRY_MS;
+    } else {
+      exhausted = !suggestions.length;
+      status = exhausted ? { text: "No answers found for this category." } : null;
+    }
     render();
+    topUp();
+  }
+
+  // When fewer than a screenful are left, asks for answers nobody has suggested or
+  // said yet. A reply with nothing new means the category has run dry. A failed
+  // request is tried again after a pause, since room messages keep calling this.
+  async function topUp() {
+    const category = requested;
+    if (!category || !isActive(room) || fetchingMore || exhausted || status?.searching || status?.needsKey) return;
+    if (Date.now() < retryAt || remaining(room, suggestions).length >= VISIBLE) return;
+    fetchingMore = true;
+    render();
+    let reply;
+    try {
+      reply = await chrome.runtime.sendMessage({ type: "suggest", prompt: category, mode: "party", exclude: used(room, suggestions) });
+    } catch {
+      reply = { note: "Lost connection to the extension. Refresh this page." };
+    }
+    if (category !== requested) return;
+    fetchingMore = false;
+    if (reply?.note) {
+      status = { text: reply.note, needsKey: reply.needsKey };
+      retryAt = Date.now() + RETRY_MS;
+    } else {
+      const fresh = addFresh(room, suggestions, reply?.suggestions ?? []);
+      suggestions = [...suggestions, ...fresh];
+      exhausted = !fresh.length;
+      status = null;
+    }
+    render();
+    topUp();
   }
 
   window.addEventListener("message", (event) => {
@@ -149,6 +194,7 @@
       requestSuggestions(room.category);
     }
     render();
+    topUp();
   });
 
   document.addEventListener(

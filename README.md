@@ -16,7 +16,7 @@ A personal Chrome extension that suggests obscure answers while you play [Krilli
 - **Where it runs:** Unlimited, Archive and themed packs. On the Daily Dive, suggestions stay off until you turn them on from the panel. In Puffer Party, it runs in hosted public and private rooms during a round. Rated and Quick Play stay off.
 - **playdaily.org:** dives at playdaily.org/krillion, Classic and Endless, also get suggestions, ranked for that site's steeper points. It keeps its own saved answers, separate from krillion.io, and doesn't count toward the toolbar popup. Its 1 vs 1 and multiplayer stay off.
 - **Toolbar popup:** shows your dive pace on a water column, how many answers landed in each tier, and a switch for the Daily Dive.
-- **Puffer Party:** suggests answers for the current category, safest first, and removes anything already accepted or missed by anyone in the room. Clicking one fills the answer box at any point in the round, so you can have it ready before your turn. It reads the game's room messages but never sends anything or submits for you.
+- **Puffer Party:** suggests answers for the current category, safest first, and removes anything already accepted or missed by anyone in the room. When fewer than six are left, it asks Claude for more answers nobody has used, and stops only when Claude has nothing new for that category. Clicking one fills the answer box at any point in the round, so you can have it ready before your turn. It reads the game's room messages but never sends anything or submits for you.
 
 ## What the game does
 

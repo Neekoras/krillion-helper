@@ -99,5 +99,22 @@
     return suggestions.filter((s) => !room.said.has(normalizeAnswer(s.name)));
   }
 
-  globalThis.KrillionParty = { normalizeAnswer, createRoom, applyMessage, observedAnswers, isActive, remaining };
+  // Everything already suggested or said this category, for asking Claude to skip them.
+  function used(room, suggestions) {
+    return [...new Set([...suggestions.map((s) => normalizeAnswer(s.name)), ...room.said])];
+  }
+
+  // Adds only answers that are new to the list and haven't been said.
+  function addFresh(room, suggestions, incoming) {
+    const known = new Set(used(room, suggestions));
+    const fresh = [];
+    for (const s of incoming) {
+      const key = normalizeAnswer(s.name);
+      if (!known.has(key)) fresh.push(s);
+      known.add(key);
+    }
+    return fresh;
+  }
+
+  globalThis.KrillionParty = { normalizeAnswer, createRoom, applyMessage, observedAnswers, isActive, remaining, used, addFresh };
 })();
