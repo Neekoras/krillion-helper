@@ -93,20 +93,34 @@ export function parseAnswers(text) {
 // Compares names loosely, so "São Tomé" and "sao tome" count as the same answer.
 const sameName = (name) => name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
+// How many new names arrive before the list on screen updates while Claude writes.
+const PARTIAL_STEP = 3;
+
 // Listing names needs no reasoning, so thinking stays off to keep the list fast.
-async function ask(prompt, apiKey, fetchFn, query, exclude) {
-  const message = await createClient(apiKey, fetchFn).messages.create(
-    {
-      model: MODEL,
-      max_tokens: 16000,
-      thinking: NO_THINKING,
-      output_config: { effort: "low", format: { type: "json_schema", schema: SCHEMA } },
-      messages: [{ role: "user", content: query(prompt, exclude) }],
-    },
-    { timeout: TIMEOUT_MS },
-  );
+// With onPartial, the reply streams in and onPartial sees the names so far, so
+// the panel can show answers before the whole list and its ranking are done.
+async function ask(prompt, apiKey, fetchFn, query, { exclude = [], job, onPartial } = {}) {
   const used = new Set(exclude.map(sameName));
-  return parseAnswers(replyText(message) || "{}").filter((name) => !used.has(sameName(name)));
+  const fresh = (text) => parseAnswers(text || "{}").filter((name) => !used.has(sameName(name)));
+  const client = createClient(apiKey, fetchFn, job);
+  const request = {
+    model: MODEL,
+    max_tokens: 16000,
+    thinking: NO_THINKING,
+    output_config: { effort: "low", format: { type: "json_schema", schema: SCHEMA } },
+    messages: [{ role: "user", content: query(prompt, exclude) }],
+  };
+  if (!onPartial) return fresh(replyText(await client.messages.create(request, { timeout: TIMEOUT_MS })));
+  const stream = client.messages.stream(request, { timeout: TIMEOUT_MS });
+  let shown = 0;
+  stream.on("text", (_delta, snapshot) => {
+    const names = fresh(snapshot);
+    if (names.length >= shown + PARTIAL_STEP) {
+      shown = names.length;
+      onPartial(names);
+    }
+  });
+  return fresh(replyText(await stream.finalMessage()));
 }
 
 // A prompt with a short, closed list, such as the actors who have played Bond, leaves
@@ -114,13 +128,15 @@ async function ask(prompt, apiKey, fetchFn, query, exclude) {
 // list out, and grading still puts the rarest of them first.
 const MIN_CANDIDATES = 10;
 
-// An empty reply gets one retry. Answers in exclude are never returned.
-export async function getCandidates(prompt, apiKey, fetchFn = fetch, query = buildQuery, exclude = []) {
-  let found = await ask(prompt, apiKey, fetchFn, query, exclude);
-  if (!found.length) found = await ask(prompt, apiKey, fetchFn, query, exclude);
+// An empty reply gets one retry. Answers in exclude are never returned. The job sets
+// the requests' place in the queue.
+export async function getCandidates(prompt, apiKey, fetchFn = fetch, query = buildQuery, options = {}) {
+  let found = await ask(prompt, apiKey, fetchFn, query, options);
+  if (!found.length) found = await ask(prompt, apiKey, fetchFn, query, options);
   if (found.length >= MIN_CANDIDATES || query === buildSurvivalQuery) return found;
+  const onPartial = options.onPartial && ((names) => options.onPartial(parseAnswers({ answers: [...found, ...names] })));
   try {
-    return parseAnswers({ answers: [...found, ...(await ask(prompt, apiKey, fetchFn, buildSurvivalQuery, exclude))] });
+    return parseAnswers({ answers: [...found, ...(await ask(prompt, apiKey, fetchFn, buildSurvivalQuery, { ...options, onPartial }))] });
   } catch (err) {
     if (found.length) return found;
     throw err;

@@ -109,8 +109,8 @@ export function rankForSurvival(candidates, answers) {
 }
 
 // Batches grade in parallel, so a long list takes about as long as a short one.
-export async function grade(prompt, candidates, apiKey, fetchFn = fetch, rank = applyGrades) {
-  const client = createClient(apiKey, fetchFn);
+export async function grade(prompt, candidates, apiKey, fetchFn = fetch, rank = applyGrades, job) {
+  const client = createClient(apiKey, fetchFn, job);
   const batches = [];
   for (let first = 0; first < candidates.length; first += BATCH_SIZE) {
     const request = buildRequest(prompt, candidates.slice(first, first + BATCH_SIZE), first);

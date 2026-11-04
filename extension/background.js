@@ -2,6 +2,7 @@ import { buildDeepQuery, buildQuery, buildSurvivalQuery, getCandidates } from ".
 import { applyGrades, grade, rankForDeepTiers, rankForSurvival } from "./lib/grading.js";
 import { addReveal, applyKnown, merge, promptKey, recordAnswers } from "./lib/book.js";
 import { describeError } from "./lib/messages.js";
+import { makeUrgent } from "./lib/claude.js";
 
 // The two sites grade differently, so each keeps its own saved answers and results.
 function storeName(name, sender) {
@@ -10,31 +11,46 @@ function storeName(name, sender) {
 
 // Dive suggestions by site and prompt, so a prompt fetched ahead of time is ready
 // when it appears. Replies with a note (an error, a missing key) aren't kept.
+// Each keeps its queue job, so its requests can move ahead once its prompt is on screen.
 const MAX_READY = 30;
 const ready = new Map();
 
-function generateOnce(prompt, sender) {
+function generateOnce(prompt, sender, urgent) {
   const key = `${storeName("book", sender)} ${promptKey(prompt)}`;
   if (!ready.has(key)) {
-    const reply = generate(prompt, false, sender);
-    ready.set(key, reply);
+    const job = { urgent, partial: null };
+    const reply = generate(prompt, false, sender, [], job);
+    ready.set(key, { reply, job });
     reply.then((r) => r.note && ready.delete(key), () => ready.delete(key));
     while (ready.size > MAX_READY) ready.delete(ready.keys().next().value);
   }
-  return ready.get(key);
+  const { reply, job } = ready.get(key);
+  if (urgent && !job.urgent) {
+    makeUrgent(job);
+    if (job.partial) sendPartial(sender, "dive", prompt, job.partial);
+  }
+  return reply;
+}
+
+// Shows answers in the tab while Claude is still writing and ranking them.
+function sendPartial(sender, mode, prompt, suggestions) {
+  if (sender.tab?.id === undefined) return;
+  chrome.tabs.sendMessage(sender.tab.id, { type: "partial", mode, prompt, suggestions }, { frameId: sender.frameId }).catch(() => {});
 }
 
 async function suggest(prompt, mode, sender, exclude = []) {
   const party = mode === "party";
   const seenName = storeName("seen", sender);
   const { [seenName]: seen = {} } = await chrome.storage.local.get(seenName);
-  const reply = await (party ? generate(prompt, true, sender, exclude) : generateOnce(prompt, sender));
+  const reply = await (party ? generate(prompt, true, sender, exclude) : generateOnce(prompt, sender, true));
   return { ...reply, suggestions: applyKnown(seen[promptKey(prompt)], reply.suggestions, { party }) };
 }
 
-async function generate(prompt, party, sender, exclude = []) {
+async function generate(prompt, party, sender, exclude = [], job = { urgent: true, partial: null }) {
   const bookName = storeName("book", sender);
-  const { anthropicKey, [bookName]: book = {} } = await chrome.storage.local.get(["anthropicKey", bookName]);
+  const seenName = storeName("seen", sender);
+  const stored = await chrome.storage.local.get(["anthropicKey", bookName, seenName]);
+  const { anthropicKey, [bookName]: book = {}, [seenName]: seen = {} } = stored;
   const entry = book[promptKey(prompt)];
   const deep = bookName !== "book";
   const query = party ? buildSurvivalQuery : deep ? buildDeepQuery : buildQuery;
@@ -46,16 +62,25 @@ async function generate(prompt, party, sender, exclude = []) {
     return { suggestions: merge(entry, []), note: "Suggestions need an Anthropic key.", needsKey: true };
   }
 
+  // A party top-up adds to a list already on screen, so only first lists stream in.
+  const mode = party ? "party" : "dive";
+  const onPartial = exclude.length
+    ? undefined
+    : (names) => {
+        job.partial = applyKnown(seen[promptKey(prompt)], merge(entry, names, Infinity), { party });
+        if (job.urgent) sendPartial(sender, mode, prompt, job.partial);
+      };
+
   let candidates;
   try {
-    candidates = await getCandidates(prompt, anthropicKey, fetch, query, exclude);
+    candidates = await getCandidates(prompt, anthropicKey, fetch, query, { exclude, job, onPartial });
   } catch (err) {
     return { suggestions: merge(entry, []), note: describeError(err) };
   }
   if (!candidates.length) return { suggestions: merge(entry, []) };
 
   try {
-    const graded = await grade(prompt, candidates, anthropicKey, fetch, rank);
+    const graded = await grade(prompt, candidates, anthropicKey, fetch, rank, job);
     return { suggestions: merge(entry, graded.length ? graded : candidates, Infinity) };
   } catch {
     return { suggestions: merge(entry, candidates, Infinity), note: "Couldn't rank these, so check them first." };
@@ -87,7 +112,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     suggest(message.prompt, message.mode, sender, message.exclude).then(sendResponse);
     return true;
   }
-  if (message.type === "prefetch") for (const prompt of message.prompts) generateOnce(prompt, sender);
+  if (message.type === "prefetch") for (const prompt of message.prompts) generateOnce(prompt, sender, false);
   if (message.type === "reveal") saveInOrder(storeName("book", sender), (book) => addReveal(book, message.rounds));
   if (message.type === "result") saveResult(message, sender);
   if (message.type === "seen") saveInOrder(storeName("seen", sender), (seen) => recordAnswers(seen, message.items));

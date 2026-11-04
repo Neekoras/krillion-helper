@@ -4,6 +4,7 @@ import { buildSurvivalQuery, getCandidates, parseAnswers } from "../extension/li
 import { applyGrades, buildRequest, grade, rankForDeepTiers, rankForSurvival, toAnswers } from "../extension/lib/grading.js";
 import { addReveal, applyKnown, diveDepth, merge, promptKey, recordAnswers, summarize } from "../extension/lib/book.js";
 import { describeError } from "../extension/lib/messages.js";
+import { createClient, makeUrgent } from "../extension/lib/claude.js";
 import { APIConnectionTimeoutError, AuthenticationError, RateLimitError } from "../extension/vendor/anthropic-sdk.js";
 
 test("parseAnswers removes duplicates and padded names", () => {
@@ -38,6 +39,20 @@ const claudeReply = (text, stop_reason = "end_turn") =>
     }),
     { status: 200, headers: { "content-type": "application/json" } },
   );
+
+// A streamed Messages API reply, sending the text in the given pieces.
+const claudeStream = (pieces) => {
+  const event = (type, data) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
+  const body = [
+    event("message_start", { message: { id: "msg_test", type: "message", role: "assistant", model: "claude-sonnet-5-5", content: [], stop_reason: null, usage: { input_tokens: 1, output_tokens: 0 } } }),
+    event("content_block_start", { index: 0, content_block: { type: "text", text: "" } }),
+    ...pieces.map((text) => event("content_block_delta", { index: 0, delta: { type: "text_delta", text } })),
+    event("content_block_stop", { index: 0 }),
+    event("message_delta", { delta: { stop_reason: "end_turn" }, usage: { output_tokens: 1 } }),
+    event("message_stop", {}),
+  ].join("");
+  return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+};
 
 const claudeError = (status, type) =>
   new Response(JSON.stringify({ type: "error", error: { type, message: "test" } }), {
@@ -76,6 +91,39 @@ test("getCandidates doesn't top up a long list or a safe one", async () => {
   calls = 1;
   assert.deepEqual(await getCandidates("Name a tea", "k", fetchFn, buildSurvivalQuery), ["Sencha"]);
   assert.equal(calls, 2);
+});
+
+test("getCandidates shows names as they stream in, a few at a time", async () => {
+  const names = Array.from({ length: 10 }, (_, i) => `Tea ${i}`);
+  const pieces = ['{"answers":[', ...names.map((n, i) => `${i ? "," : ""}"${n}"`), "]}"];
+  const partials = [];
+  const out = await getCandidates("Name a tea", "k", async () => claudeStream(pieces), undefined, { onPartial: (p) => partials.push(p.length) });
+  assert.deepEqual(out, names);
+  assert.deepEqual(partials, [3, 6, 9]);
+});
+
+test("requests for the prompt on screen jump the queue", async () => {
+  const gates = [];
+  const started = [];
+  const fetchFn = (_url, init) => {
+    started.push(JSON.parse(init.body).messages[0].content);
+    return new Promise((resolve) => gates.push(() => resolve(claudeReply("ok"))));
+  };
+  const send = (name, job) => createClient("k", fetchFn, job).messages.create({ model: "m", max_tokens: 1, messages: [{ role: "user", content: name }] });
+  const early = { urgent: false };
+  const all = Array.from({ length: 10 }, (_, i) => send(`busy ${i}`, early));
+  const onScreen = { urgent: false };
+  all.push(send("on screen", onScreen));
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(started.length, 8, "early requests leave places free for the screen");
+  makeUrgent(onScreen);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(started.at(-1), "on screen");
+  gates.shift()();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(started.length, 9, "early requests stay within their share");
+  while (gates.length) gates.shift()(), await new Promise((r) => setTimeout(r, 5));
+  await Promise.all(all);
 });
 
 test("getCandidates reads Claude's answers and retries an empty list", async () => {
@@ -194,7 +242,7 @@ test("getCandidates asks for answers not used yet and never returns one", async 
     body = JSON.parse(init.body);
     return claudeReply('{"answers":["Sencha","Hōji Cha","Gyokuro"]}');
   };
-  const out = await getCandidates("Name a tea", "k", fetchFn, buildSurvivalQuery, ["sencha", "hoji cha"]);
+  const out = await getCandidates("Name a tea", "k", fetchFn, buildSurvivalQuery, { exclude: ["sencha", "hoji cha"] });
   assert.deepEqual(out, ["Gyokuro"]);
   assert.match(body.messages[0].content, /already used[\s\S]*\nsencha\nhoji cha$/);
 });

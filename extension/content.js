@@ -214,6 +214,16 @@
     if (currentPrompt) chrome.runtime.sendMessage({ type: "seen", items: [{ prompt: currentPrompt, name, tier }] });
   }
 
+  // Answers as Claude writes them, shown until the ranked list arrives. A prompt
+  // fetched early was named by the game's data, so its spacing can differ from the page.
+  const sameKey = (a, b) => [a, b].map((p) => String(p).trim().toLowerCase().replace(/\s+/g, " ")).reduce((x, y) => x === y);
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message.type !== "partial" || message.mode !== "dive" || !sameKey(message.prompt, currentPrompt) || !status?.searching) return;
+    suggestions = message.suggestions;
+    status = { text: "Ranking these", searching: true };
+    render();
+  });
+
   window.addEventListener("message", (event) => {
     if (event.source !== window || event.data?.source !== "krillion-helper") return;
     const { type, payload } = event.data;

@@ -180,6 +180,14 @@
     topUp();
   }
 
+  // Answers as Claude writes them, shown until the ranked list arrives.
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message.type !== "partial" || message.mode !== "party" || message.prompt !== requested || !status?.searching) return;
+    suggestions = addFresh(room, [], message.suggestions);
+    status = { text: "Ranking these", searching: true };
+    render();
+  });
+
   window.addEventListener("message", (event) => {
     if (event.source !== window || event.data?.source !== "krillion-helper" || event.data.type !== "party") return;
     const before = { category: room.category, categoryIndex: room.categoryIndex };
