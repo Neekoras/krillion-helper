@@ -99,8 +99,20 @@ async function ask(prompt, apiKey, fetchFn, query) {
   return parseAnswers(replyText(message) || "{}");
 }
 
+// A prompt with a short, closed list, such as the actors who have played Bond, leaves
+// few obscure answers, and the ones Claude finds are often wrong. Safe answers fill the
+// list out, and grading still puts the rarest of them first.
+const MIN_CANDIDATES = 10;
+
 // An empty reply gets one retry.
 export async function getCandidates(prompt, apiKey, fetchFn = fetch, query = buildQuery) {
-  const first = await ask(prompt, apiKey, fetchFn, query);
-  return first.length ? first : ask(prompt, apiKey, fetchFn, query);
+  let found = await ask(prompt, apiKey, fetchFn, query);
+  if (!found.length) found = await ask(prompt, apiKey, fetchFn, query);
+  if (found.length >= MIN_CANDIDATES || query === buildSurvivalQuery) return found;
+  try {
+    return parseAnswers({ answers: [...found, ...(await ask(prompt, apiKey, fetchFn, buildSurvivalQuery))] });
+  } catch (err) {
+    if (found.length) return found;
+    throw err;
+  }
 }

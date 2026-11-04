@@ -50,14 +50,42 @@ test("getCandidates reports API errors", async () => {
   await assert.rejects(getCandidates("Name a tea", "k", fetchFn), AuthenticationError);
 });
 
+const tenTeas = JSON.stringify({ answers: Array.from({ length: 10 }, (_, i) => `Tea ${i}`) });
+
+test("getCandidates tops up a short list with safe answers", async () => {
+  const sent = [];
+  const fetchFn = async (url, init) => {
+    sent.push(JSON.parse(init.body).messages[0].content);
+    return claudeReply(sent.length === 1 ? '{"answers":["Barry Nelson"]}' : '{"answers":["Sean Connery","barry nelson","George Lazenby"]}');
+  };
+  const prompt = "Name an actor who has played James Bond";
+  assert.deepEqual(await getCandidates(prompt, "k", fetchFn), ["Barry Nelson", "Sean Connery", "George Lazenby"]);
+  assert.equal(sent[1], buildSurvivalQuery(prompt));
+});
+
+test("getCandidates keeps a short list if the top-up fails", async () => {
+  let calls = 0;
+  const fetchFn = async () => (++calls === 1 ? claudeReply('{"answers":["Barry Nelson"]}') : claudeError(529, "overloaded_error"));
+  assert.deepEqual(await getCandidates("Name a Bond actor", "k", fetchFn), ["Barry Nelson"]);
+});
+
+test("getCandidates doesn't top up a long list or a safe one", async () => {
+  let calls = 0;
+  const fetchFn = async () => (calls++, claudeReply(calls === 1 ? tenTeas : '{"answers":["Sencha"]}'));
+  assert.equal((await getCandidates("Name a tea", "k", fetchFn)).length, 10);
+  calls = 1;
+  assert.deepEqual(await getCandidates("Name a tea", "k", fetchFn, buildSurvivalQuery), ["Sencha"]);
+  assert.equal(calls, 2);
+});
+
 test("getCandidates reads Claude's answers and retries an empty list", async () => {
-  const replies = [claudeReply('{"answers":[]}'), claudeReply('{"answers":["Sahlab"]}')];
+  const replies = [claudeReply('{"answers":[]}'), claudeReply(tenTeas)];
   const sent = [];
   const fetchFn = async (url, init) => {
     sent.push({ url: String(url), init });
     return replies[sent.length - 1];
   };
-  assert.deepEqual(await getCandidates("Name a tea", "secret", fetchFn), ["Sahlab"]);
+  assert.equal((await getCandidates("Name a tea", "secret", fetchFn))[0], "Tea 0");
   assert.equal(sent.length, 2);
   assert.equal(sent[0].url, "https://api.anthropic.com/v1/messages");
   assert.equal(new Headers(sent[0].init.headers).get("authorization"), "Bearer secret");
