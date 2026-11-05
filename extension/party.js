@@ -105,7 +105,7 @@
       const list = el("ol", "kh-list");
       left.slice(0, VISIBLE).forEach((s, i) => list.append(renderItem(s, i)));
       panel.append(list);
-      panel.append(el("p", "kh-hint", "Alt + number fills it. Enter passes the puffer."));
+      panel.append(el("p", "kh-hint", "Press its number to fill it. Enter passes the puffer."));
     } else if (!status && suggestions.length && !fetchingMore) {
       panel.append(renderOutOfAnswers());
     }
@@ -180,14 +180,6 @@
     topUp();
   }
 
-  // Answers as Claude writes them, shown until the ranked list arrives.
-  chrome.runtime.onMessage.addListener((message) => {
-    if (message.type !== "partial" || message.mode !== "party" || message.prompt !== requested || !status?.searching) return;
-    suggestions = addFresh(room, [], message.suggestions);
-    status = { text: "Ranking these", searching: true };
-    render();
-  });
-
   window.addEventListener("message", (event) => {
     if (event.source !== window || event.data?.source !== "krillion-helper" || event.data.type !== "party") return;
     const before = { category: room.category, categoryIndex: room.categoryIndex };
@@ -205,12 +197,24 @@
     topUp();
   });
 
+  // A number key picks a suggestion, unless you're typing: in the answer box once it
+  // has text, so answers like "Cars 2" still work, or in any other field.
+  function suggestionNumber(event, box) {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null;
+    const match = /^(?:Digit|Numpad)([1-9])$/.exec(event.code);
+    if (!match) return null;
+    const target = event.target;
+    const field = target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
+    if (field && (target !== box || box.value)) return null;
+    return Number(match[1]);
+  }
+
   document.addEventListener(
     "keydown",
     (event) => {
-      if (!event.altKey || panel.hidden || collapsed) return;
-      const match = /^Digit([1-9])$/.exec(event.code);
-      const suggestion = match && remaining(room, suggestions).slice(0, VISIBLE)[Number(match[1]) - 1];
+      if (panel.hidden || collapsed) return;
+      const number = suggestionNumber(event, answerBox());
+      const suggestion = number && remaining(room, suggestions).slice(0, VISIBLE)[number - 1];
       if (!suggestion) return;
       event.preventDefault();
       event.stopPropagation();

@@ -129,7 +129,7 @@
       const left = suggestions.length - Math.min(suggestions.length, VISIBLE);
       const rejected = rejectedCount ? `${rejectedCount} not accepted. ` : "";
       const more = left ? `${left} more ready. ` : "";
-      panel.append(el("p", "kh-hint", `${rejected}${more}Alt + number fills it. Enter dives.`));
+      panel.append(el("p", "kh-hint", `${rejected}${more}Press its number to fill it. Enter dives.`));
     }
     if (lastResult) {
       const result = el("p", "kh-result");
@@ -195,13 +195,24 @@
     if (prompt && prompt !== currentPrompt) onPrompt(prompt);
   }
 
-  // e.code stays Digit1 on a Mac, where Alt+1 would otherwise type a symbol.
+  // A number key picks a suggestion, unless you're typing: in the answer box once it
+  // has text, so answers like "Cars 2" still work, or in any other field.
+  function suggestionNumber(event, box) {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null;
+    const match = /^(?:Digit|Numpad)([1-9])$/.exec(event.code);
+    if (!match) return null;
+    const target = event.target;
+    const field = target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
+    if (field && (target !== box || box.value)) return null;
+    return Number(match[1]);
+  }
+
   document.addEventListener(
     "keydown",
     (event) => {
-      if (!event.altKey || panel.hidden || collapsed) return;
-      const match = /^Digit([1-9])$/.exec(event.code);
-      const suggestion = match && suggestions.slice(0, VISIBLE)[Number(match[1]) - 1];
+      if (panel.hidden || collapsed) return;
+      const number = suggestionNumber(event, document.querySelector(PLAYDAILY ? ".kr-input" : ".ds-input"));
+      const suggestion = number && suggestions.slice(0, VISIBLE)[number - 1];
       if (!suggestion) return;
       event.preventDefault();
       event.stopPropagation();
@@ -213,16 +224,6 @@
   function rememberSeen(name, tier) {
     if (currentPrompt) chrome.runtime.sendMessage({ type: "seen", items: [{ prompt: currentPrompt, name, tier }] });
   }
-
-  // Answers as Claude writes them, shown until the ranked list arrives. A prompt
-  // fetched early was named by the game's data, so its spacing can differ from the page.
-  const sameKey = (a, b) => [a, b].map((p) => String(p).trim().toLowerCase().replace(/\s+/g, " ")).reduce((x, y) => x === y);
-  chrome.runtime.onMessage.addListener((message) => {
-    if (message.type !== "partial" || message.mode !== "dive" || !sameKey(message.prompt, currentPrompt) || !status?.searching) return;
-    suggestions = message.suggestions;
-    status = { text: "Ranking these", searching: true };
-    render();
-  });
 
   window.addEventListener("message", (event) => {
     if (event.source !== window || event.data?.source !== "krillion-helper") return;

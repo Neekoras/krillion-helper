@@ -12,9 +12,13 @@ const SCHEMA = {
   additionalProperties: false,
 };
 
+// Thirty answers can all be written and graded within the eight seconds a list may
+// take. Replaying saved dives, ranking 30 scored the same as ranking 40.
+const COUNT = 30;
+
 export function buildQuery(prompt) {
   return (
-    `Trivia prompt: "${prompt}". List 40 answers that most people would not think ` +
+    `Trivia prompt: "${prompt}". List ${COUNT} answers that most people would not think ` +
     `of but that have their own Wikipedia article or appear on a Wikipedia list. ` +
     `Use the common English name exactly as Wikipedia titles it, with no added ` +
     `words or punctuation. Leave out famous examples and the usual "obscure" picks ` +
@@ -27,7 +31,7 @@ export function buildQuery(prompt) {
 // it shows, so this skips the Wikipedia limit and goes as deep as it can.
 export function buildDeepQuery(prompt) {
   return (
-    `Trivia prompt: "${prompt}". List 40 real answers that almost nobody would think ` +
+    `Trivia prompt: "${prompt}". List ${COUNT} real answers that almost nobody would think ` +
     `of, starting with the rarest. Leave out famous examples and the usual "obscure" ` +
     `picks that everyone reaches for. Use the plain common name, with no added words ` +
     `or punctuation. Every answer must strictly satisfy the prompt.`
@@ -39,7 +43,7 @@ export function buildDeepQuery(prompt) {
 // Later in a category it also lists the answers already used, so it finds new ones.
 export function buildSurvivalQuery(prompt, exclude = []) {
   const query =
-    `Party game category: "${prompt}". List 40 answers that a broad reference list ` +
+    `Party game category: "${prompt}". List ${COUNT} answers that a broad reference list ` +
     `of answers would certainly include, starting with the ones you are most sure ` +
     `of. Mix very common answers with moderately well-known ones. Use the plain ` +
     `name most people would type, with no added words or punctuation. Every answer ` +
@@ -47,7 +51,7 @@ export function buildSurvivalQuery(prompt, exclude = []) {
   if (!exclude.length) return query;
   return (
     `${query} These answers are already used, so leave them out and give different ` +
-    `ones. If there are fewer than 40 left, list only the ones that remain:\n` +
+    `ones. If there are fewer than ${COUNT} left, list only the ones that remain:\n` +
     exclude.join("\n")
   );
 }

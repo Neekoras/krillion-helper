@@ -1,5 +1,5 @@
 import { buildDeepQuery, buildQuery, buildSurvivalQuery, getCandidates } from "./lib/candidates.js";
-import { applyGrades, grade, rankForDeepTiers, rankForSurvival } from "./lib/grading.js";
+import { applyGrades, rankForDeepTiers, rankForSurvival, startGrading } from "./lib/grading.js";
 import { addReveal, applyKnown, merge, promptKey, recordAnswers } from "./lib/book.js";
 import { describeError } from "./lib/messages.js";
 import { makeUrgent } from "./lib/claude.js";
@@ -18,7 +18,7 @@ const ready = new Map();
 function generateOnce(prompt, sender, urgent) {
   const key = `${storeName("book", sender)} ${promptKey(prompt)}`;
   if (!ready.has(key)) {
-    const job = { urgent, partial: null };
+    const job = { urgent, shownAt: urgent ? Date.now() : null };
     const reply = generate(prompt, false, sender, [], job);
     ready.set(key, { reply, job });
     reply.then((r) => r.note && ready.delete(key), () => ready.delete(key));
@@ -26,16 +26,10 @@ function generateOnce(prompt, sender, urgent) {
   }
   const { reply, job } = ready.get(key);
   if (urgent && !job.urgent) {
+    job.shownAt = Date.now();
     makeUrgent(job);
-    if (job.partial) sendPartial(sender, "dive", prompt, job.partial);
   }
   return reply;
-}
-
-// Shows answers in the tab while Claude is still writing and ranking them.
-function sendPartial(sender, mode, prompt, suggestions) {
-  if (sender.tab?.id === undefined) return;
-  chrome.tabs.sendMessage(sender.tab.id, { type: "partial", mode, prompt, suggestions }, { frameId: sender.frameId }).catch(() => {});
 }
 
 async function suggest(prompt, mode, sender, exclude = []) {
@@ -46,11 +40,28 @@ async function suggest(prompt, mode, sender, exclude = []) {
   return { ...reply, suggestions: applyKnown(seen[promptKey(prompt)], reply.suggestions, { party }) };
 }
 
-async function generate(prompt, party, sender, exclude = [], job = { urgent: true, partial: null }) {
+// The ranked list has to be on screen within 8 seconds of the prompt appearing, so
+// ranking stops here, leaving time to show it. Answers not graded by then are left
+// out, since an ungraded answer may not fit. A prompt fetched early has no deadline
+// until it's on screen.
+const RANK_WITHIN_MS = 7500;
+
+function deadline(job) {
+  let stop;
+  const cutoff = new Promise((resolve) => {
+    const check = () => {
+      if (stop) return;
+      if (job.shownAt !== null && Date.now() >= job.shownAt + RANK_WITHIN_MS) resolve();
+      else setTimeout(check, 100);
+    };
+    check();
+  });
+  return { cutoff, cancel: () => (stop = true) };
+}
+
+async function generate(prompt, party, sender, exclude = [], job = { urgent: true, shownAt: Date.now() }) {
   const bookName = storeName("book", sender);
-  const seenName = storeName("seen", sender);
-  const stored = await chrome.storage.local.get(["anthropicKey", bookName, seenName]);
-  const { anthropicKey, [bookName]: book = {}, [seenName]: seen = {} } = stored;
+  const { anthropicKey, [bookName]: book = {} } = await chrome.storage.local.get(["anthropicKey", bookName]);
   const entry = book[promptKey(prompt)];
   const deep = bookName !== "book";
   const query = party ? buildSurvivalQuery : deep ? buildDeepQuery : buildQuery;
@@ -62,28 +73,36 @@ async function generate(prompt, party, sender, exclude = [], job = { urgent: tru
     return { suggestions: merge(entry, []), note: "Suggestions need an Anthropic key.", needsKey: true };
   }
 
-  // A party top-up adds to a list already on screen, so only first lists stream in.
-  const mode = party ? "party" : "dive";
-  const onPartial = exclude.length
-    ? undefined
-    : (names) => {
-        job.partial = applyKnown(seen[promptKey(prompt)], merge(entry, names, Infinity), { party });
-        if (job.urgent) sendPartial(sender, mode, prompt, job.partial);
-      };
-
-  let candidates;
+  // Grading starts while Claude is still writing the list.
+  const grading = startGrading(prompt, anthropicKey, fetch, job);
+  let written = [];
+  const onPartial = (names) => {
+    written = names;
+    grading.add(names);
+  };
+  const { cutoff, cancel } = deadline(job);
   try {
-    candidates = await getCandidates(prompt, anthropicKey, fetch, query, { exclude, job, onPartial });
-  } catch (err) {
-    return { suggestions: merge(entry, []), note: describeError(err) };
-  }
-  if (!candidates.length) return { suggestions: merge(entry, []) };
+    let candidates;
+    try {
+      const listed = getCandidates(prompt, anthropicKey, fetch, query, { exclude, job, onPartial });
+      listed.catch(() => {}); // an error after the cutoff no longer matters
+      candidates = await Promise.race([listed, cutoff.then(() => written)]);
+    } catch (err) {
+      return { suggestions: merge(entry, []), note: describeError(err) };
+    }
+    if (!candidates.length) {
+      const late = job.shownAt !== null && Date.now() >= job.shownAt + RANK_WITHIN_MS;
+      return { suggestions: merge(entry, []), ...(late && { note: "Claude took too long on this one." }) };
+    }
 
-  try {
-    const graded = await grade(prompt, candidates, anthropicKey, fetch, rank, job);
-    return { suggestions: merge(entry, graded.length ? graded : candidates, Infinity) };
-  } catch {
-    return { suggestions: merge(entry, candidates, Infinity), note: "Couldn't rank these, so check them first." };
+    try {
+      const graded = await grading.finish(candidates, rank, cutoff);
+      return { suggestions: merge(entry, graded.length ? graded : candidates, Infinity) };
+    } catch {
+      return { suggestions: merge(entry, candidates, Infinity), note: "Couldn't rank these, so check them first." };
+    }
+  } finally {
+    cancel();
   }
 }
 

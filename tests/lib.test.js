@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildSurvivalQuery, getCandidates, parseAnswers } from "../extension/lib/candidates.js";
-import { applyGrades, buildRequest, grade, rankForDeepTiers, rankForSurvival, toAnswers } from "../extension/lib/grading.js";
+import { applyGrades, buildRequest, grade, rankForDeepTiers, rankForSurvival, startGrading, toAnswers } from "../extension/lib/grading.js";
 import { addReveal, applyKnown, diveDepth, merge, promptKey, recordAnswers, summarize } from "../extension/lib/book.js";
 import { describeError } from "../extension/lib/messages.js";
 import { createClient, makeUrgent } from "../extension/lib/claude.js";
@@ -271,6 +271,48 @@ test("grade sends one request per batch of ten and ranks every batch together", 
   assert.deepEqual(bodies[1].output_config.format.schema.required, ["10", "11"]);
   assert.equal(order[0], "Tea 11");
   assert.equal(order.length, 12);
+});
+
+// Grades every requested number, with Tea 1 the most obscure.
+const gradeAll = (sent) => async (_url, init) => {
+  const body = JSON.parse(init.body);
+  sent?.push(body.messages[0].content);
+  const numbers = body.output_config.format.schema.required;
+  const names = [...body.messages[0].content.matchAll(/^(\d+)\. (.*)$/gm)].map((m) => m[2]);
+  return claudeReply(JSON.stringify(Object.fromEntries(numbers.map((n, i) => [n, [0.9, names[i] === "Tea 1" ? 3 : 1, 0.9]]))));
+};
+
+test("startGrading grades ten names at a time as they arrive", async () => {
+  const sent = [];
+  const grading = startGrading("Name a tea", "k", gradeAll(sent));
+  const names = Array.from({ length: 23 }, (_, i) => `Tea ${i}`);
+  const settle = () => new Promise((r) => setTimeout(r, 10));
+  grading.add(names.slice(0, 9));
+  await settle();
+  assert.equal(sent.length, 0);
+  grading.add(names.slice(0, 21));
+  await settle();
+  assert.equal(sent.length, 2);
+  const order = await grading.finish(names);
+  assert.equal(sent.length, 3);
+  assert.equal(order.length, 23);
+  assert.equal(order[0], "Tea 1");
+});
+
+test("startGrading ranks what's graded at the cutoff and leaves out the rest", async () => {
+  let calls = 0;
+  const graded = gradeAll();
+  const fetchFn = (url, init) => (++calls === 1 ? graded(url, init) : new Promise(() => {}));
+  const grading = startGrading("Name a tea", "k", fetchFn);
+  const names = Array.from({ length: 15 }, (_, i) => `Tea ${i}`);
+  const order = await grading.finish(names, undefined, new Promise((r) => setTimeout(r, 20)));
+  assert.equal(order.length, 10);
+  assert.equal(order[0], "Tea 1");
+});
+
+test("startGrading gives up if nothing is graded by the cutoff", async () => {
+  const grading = startGrading("Name a tea", "k", () => new Promise(() => {}));
+  await assert.rejects(grading.finish(["Sencha"], undefined, Promise.resolve()), /too long/);
 });
 
 test("grade fails when Claude stops before finishing a batch", async () => {

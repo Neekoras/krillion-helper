@@ -108,18 +108,53 @@ export function rankForSurvival(candidates, answers) {
     .map((c) => c.name);
 }
 
-// Batches grade in parallel, so a long list takes about as long as a short one.
-export async function grade(prompt, candidates, apiKey, fetchFn = fetch, rank = applyGrades, job) {
+// Grades names ten at a time as Claude writes them, so most of the list is graded by
+// the time it's finished. finish() grades the rest and ranks what has been graded when
+// every batch is back, or when cutoff settles, leaving out answers still waiting.
+export function startGrading(prompt, apiKey, fetchFn = fetch, job) {
   const client = createClient(apiKey, fetchFn, job);
+  const scores = new Map();
+  const asked = new Set();
   const batches = [];
-  for (let first = 0; first < candidates.length; first += BATCH_SIZE) {
-    const request = buildRequest(prompt, candidates.slice(first, first + BATCH_SIZE), first);
+  let first = 0;
+
+  const send = (names) => {
+    const batch = names.filter((name) => !asked.has(name)).slice(0, BATCH_SIZE);
+    if (!batch.length) return false;
+    batch.forEach((name) => asked.add(name));
+    const request = buildRequest(prompt, batch, first);
+    const offset = first;
+    first += batch.length;
     batches.push(
       client.messages.create(request, { timeout: TIMEOUT_MS }).then((message) => {
         if (message.stop_reason !== "end_turn") throw new Error(`Grading stopped early: ${message.stop_reason}`);
-        return toAnswers(JSON.parse(replyText(message)));
+        for (const [i, grades] of Object.entries(JSON.parse(replyText(message)))) {
+          if (grades.length === 3) scores.set(batch[Number(i) - offset], grades);
+        }
       }),
     );
-  }
-  return rank(candidates, (await Promise.all(batches)).flat());
+    return true;
+  };
+
+  return {
+    // Sends a batch whenever ten more names have arrived.
+    add(names) {
+      while (names.filter((name) => !asked.has(name)).length >= BATCH_SIZE) send(names);
+    },
+    async finish(candidates, rank = applyGrades, cutoff = new Promise(() => {})) {
+      while (send(candidates));
+      const all = Promise.all(batches).then(() => "done");
+      all.catch(() => {}); // a batch that fails after the cutoff no longer matters
+      if ((await Promise.race([all, cutoff.then(() => "cut off")])) !== "done" && !scores.size) {
+        throw new Error("Ranking took too long");
+      }
+      const graded = candidates.flatMap((name, i) => (scores.has(name) ? [[i, scores.get(name)]] : []));
+      return rank(candidates, toAnswers(Object.fromEntries(graded)));
+    },
+  };
+}
+
+// Batches grade in parallel, so a long list takes about as long as a short one.
+export async function grade(prompt, candidates, apiKey, fetchFn = fetch, rank = applyGrades, job) {
+  return startGrading(prompt, apiKey, fetchFn, job).finish(candidates, rank);
 }
