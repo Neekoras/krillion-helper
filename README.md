@@ -10,7 +10,7 @@ A personal Chrome extension that suggests obscure answers while you play [Krilli
 
 ## How it works
 
-- **Suggestions:** when a prompt appears, Claude Sonnet 5.5, with thinking off for speed, writes up to 30 obscure answers, then grades them in parallel batches of ten. They're ranked by obscurity times the chance a reference list includes them, and answers it's confident don't fit the prompt are removed. Grading starts while Claude is still writing, and the ranked list appears within eight seconds. Anything not graded by then is left out. Once a dive starts, the other prompts are prepared in the background, behind the one on screen. The panel shows the top six, and when one is rejected the next moves up. Click one or press its number key to fill the answer box (a number typed after other text in the box types normally), then press Enter yourself.
+- **Suggestions:** when a prompt appears, Claude Sonnet 5.5, with thinking off for speed, writes up to 30 obscure answers, then grades them in parallel batches of ten. They're ranked by obscurity squared times the chance a reference list includes them, and answers it's confident don't fit the prompt are removed. Grading starts while Claude is still writing, and the ranked list appears within eight seconds. Anything not graded by then is left out. Once a dive starts, the other prompts are prepared in the background, behind the one on screen. The panel shows the top six, and when one is rejected the next moves up. Click one or press its number key to fill the answer box (a number typed after other text in the box types normally), then press Enter yourself.
 - **Answer book:** when you finish a dive, the game shows that dive's answers. The extension saves the top answer and some Deep Cuts for each prompt and shows them first if the prompt comes up again.
 - **Known answers:** the extension remembers, per question, the answers it sees during play: tiers for accepted answers, and which ones were rejected. If a question comes up again, known answers show their tier and known misses are left out. This only uses what the game already shows you, and it never looks up answer lists.
 - **Where it runs:** Unlimited, Archive and themed packs. On the Daily Dive, suggestions stay off until you turn them on from the panel. In Puffer Party, it runs in hosted public and private rooms during a round. Rated and Quick Play stay off.
@@ -57,6 +57,14 @@ Learned from the game's Puffer Party client code. The server isn't visible, and 
 - Each accepted answer adds its tier's points to a meter: Plankton 10, Too Clever 15, Schooler 30, Rare 60, Deep Cut 85, One in a Krillion 100. At 600 you gain a heart.
 - A category ends when enough answers are accepted (`threshold`) or when someone pops.
 - Answer lists come from dictionaries, wiki pages and encyclopedias, and include aliases, according to the FAQ.
+
+Learned from the FAQ and from 1,300 of Claude's answers that were on the real lists (Daily #109, Unlimited 1 and the first Movies, Sports, Geography and Lexicon dives):
+
+- The FAQ says some prompts are tiered mechanically from a database of how often a word or name turns up in what people read and write, and the rest with a model plus a manual pass. That shows in the lists. On word, name and place prompts, a rarer tier almost always means a rarer word (the order agrees with the `wordfreq` library 80% to 90% of the time), while on film, team and sport prompts it agrees only about half the time.
+- Among listed answers, Claude's obscurity score predicts the tier well: answers it rates under 1 average 29 points, and answers it rates near 3 average 84. Word frequency predicts it less well (52 to 81 points), and it says nothing about whether an answer is listed at all.
+- Since a rejected answer only costs time, obscurity now counts for more than the chance of being listed. Squaring it turned many Rare picks into Deep Cuts in replays, with about half a rejection more per prompt.
+- The FAQ says the One in a Krillion is picked for fun factor past a certain depth, and should be something a few players actually get. Asking Claude to pick the gem among its own answers, with 12 real gems and their fun facts as examples, found it 8 times in 28, but putting that pick first gained under a point a prompt, so it isn't used.
+- Too Clever, per the FAQ, is "the go-to obscure pick that isn't actually that obscure."
 
 Learned from six Classic dives on playdaily.org, a separate game with different grading:
 

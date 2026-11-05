@@ -59,8 +59,11 @@ export function toAnswers(grades) {
 // answers scored under 0.1 were on the real lists. Testing showed that ranking by it
 // pushes suggestions toward mainstream answers that score lower.
 // Claude rates most of its own candidates 2 to 2.5 for obscurity, so obscurity keeps
-// counting all the way up. Replaying saved dives, obscurity times the chance of being
-// listed scored best, about as well as the earlier OpenAI version.
+// counting all the way up. On krillion.io a rejected answer only costs time, so the
+// chance of being listed matters less than the tier an accepted answer lands in.
+// Replaying 66 saved prompt runs, squaring obscurity turned Rare picks into Deep Cuts:
+// 78.6 points a prompt against 73.9 for obscurity times listed, and 71.3 against 70.0
+// on a separate run.
 export function applyGrades(candidates, answers) {
   const byName = new Map(answers.map((a) => [a.name, a]));
   return candidates
@@ -68,7 +71,7 @@ export function applyGrades(candidates, answers) {
       const fit = byName.get(`fits_${i}`);
       const listed = byName.get(`listed_${i}`)?.probability ?? 0;
       const obscure = byName.get(`obscure_${i}`)?.score ?? 0;
-      return { name, fits: fit?.probability ?? 0, rank: obscure * listed, i };
+      return { name, fits: fit?.probability ?? 0, rank: obscure ** 2 * listed, i };
     })
     .filter((c) => c.fits >= MIN_FIT)
     .sort((a, b) => b.rank - a.rank || a.i - b.i)

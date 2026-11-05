@@ -161,14 +161,15 @@ test("toAnswers skips a candidate whose scores came back incomplete", () => {
   );
 });
 
-test("applyGrades ranks by obscurity times the chance of being listed", () => {
+test("applyGrades ranks by obscurity squared times the chance of being listed", () => {
   const rows = [
     ["Invented tea", 0.3, 3, 0.9],
     ["Gyokuro", 0.95, 2.5, 0.9],
     ["Coffee", 1, 0, 0.9],
     ["Sencha", 0.95, 1.5, 0.9],
   ];
-  assert.deepEqual(applyGrades(rows.map(([n]) => n), grades(rows)), ["Gyokuro", "Sencha", "Invented tea", "Coffee"]);
+  // A rejection only costs time, so a likely Deep Cut outranks a certain Rare.
+  assert.deepEqual(applyGrades(rows.map(([n]) => n), grades(rows)), ["Gyokuro", "Invented tea", "Sencha", "Coffee"]);
 });
 
 test("applyGrades removes only confident misses and doesn't rank by fit", () => {
