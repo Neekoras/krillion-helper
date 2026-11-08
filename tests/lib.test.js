@@ -54,8 +54,8 @@ const claudeStream = (pieces) => {
   return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
 };
 
-const claudeError = (status, type) =>
-  new Response(JSON.stringify({ type: "error", error: { type, message: "test" } }), {
+const claudeError = (status, type, message = "test") =>
+  new Response(JSON.stringify({ type: "error", error: { type, message } }), {
     status,
     headers: { "content-type": "application/json" },
   });
@@ -383,6 +383,9 @@ test("diveDepth matches the game's 7,000m floor", () => {
 test("describeError tells the player what to do", async () => {
   const errorFrom = (fetchFn) => getCandidates("Name a tea", "k", fetchFn).catch((err) => err);
   assert.match(describeError(await errorFrom(async () => claudeError(401, "authentication_error"))), /rejected your key/);
+  const broke = claudeError(400, "invalid_request_error", "Your credit balance is too low to access the Anthropic API.");
+  assert.match(describeError(await errorFrom(async () => broke)), /out of credits/);
+  assert.match(describeError(await errorFrom(async () => claudeError(400, "invalid_request_error"))), /returned an error/);
   assert.match(describeError(await errorFrom(async () => claudeError(429, "rate_limit_error"))), /too fast/);
   assert.match(describeError(await errorFrom(async () => { throw new TypeError("Failed to fetch"); })), /Can't reach/);
   assert.match(describeError(await errorFrom(async () => claudeError(500, "api_error"))), /returned an error/);

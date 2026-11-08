@@ -16,14 +16,27 @@ const SCHEMA = {
 // take. Replaying saved dives, ranking 30 scored the same as ranking 40.
 const COUNT = 30;
 
+// What the game's own answer sheets show (see the README): lists come from Wikipedia,
+// dictionaries and encyclopedias; the tier an answer lands in depends on the shape of
+// the list; and a quarter of rejected answers were listed under a shorter name.
+const GUIDELINES =
+  `The game accepts answers from a list built by merging Wikipedia, dictionaries and ` +
+  `encyclopedias, so every answer must be a real, well-documented entry; a doubtful one ` +
+  `is worth less than a solid one. Write each the way its article or dictionary ` +
+  `headword is titled: the plain name, with no article and no descriptor the prompt ` +
+  `already implies (write "Eephus" not "Eephus pitch", "Bootleg" not "Bootleg ` +
+  `recording"), unless the longer form is the real title. For a single-word or ` +
+  `spelling prompt, rarer means a word that almost never appears in modern writing: ` +
+  `archaic, dialect and technical dictionary words beat long famous ones. Never give ` +
+  `the famous "obscure" picks, such as Antidisestablishmentarianism or Human for a ` +
+  `great ape; the game marks those down.`;
+
 export function buildQuery(prompt) {
   return (
     `Trivia prompt: "${prompt}". List ${COUNT} answers that most people would not think ` +
-    `of but that have their own Wikipedia article or appear on a Wikipedia list. ` +
-    `Use the common English name exactly as Wikipedia titles it, with no added ` +
-    `words or punctuation. Leave out famous examples and the usual "obscure" picks ` +
-    `that everyone reaches for. Favor answers enthusiasts know that have one vivid, ` +
-    `surprising fact or story behind them. Every answer must strictly satisfy the prompt.`
+    `of. Leave out famous examples. Favor answers enthusiasts know that have one vivid, ` +
+    `surprising fact or story behind them. Every answer must strictly satisfy the prompt.\n\n` +
+    GUIDELINES
   );
 }
 
