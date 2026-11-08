@@ -64,6 +64,19 @@ test("hook reads a playdaily.org answer, which calls its score points", async ()
   assert.equal(message.payload.score, 32);
 });
 
+test("hook reads a Krillocity race answer", async () => {
+  const [message] = await playback([
+    [
+      "/api/krillion/blitz/answer",
+      { accepted: true, answer: "Gardyloo", tier: "deepcut", points: 640 },
+      { body: JSON.stringify({ answer: "gardyloo", daily: { d: "2026-11-08" } }) },
+    ],
+  ]);
+  assert.equal(message.type, "submit");
+  assert.equal(message.payload.answer, "Gardyloo");
+  assert.equal(message.payload.score, 640);
+});
+
 test("hook names a playdaily.org answer list using the dealt prompt", async () => {
   const messages = await playback([
     ["/api/krillion/deal", { prompts: [{ id: "abc", text: "Name a color" }] }],

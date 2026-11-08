@@ -13,7 +13,8 @@
   }
 
   async function inspect(url, init, response) {
-    if (/\/submit(\?|$)|\/api\/krillion\/answer(\?|$)/.test(url)) {
+    // krillion.io dives, playdaily.org dives and Krillocity races all grade one answer a call.
+    if (/\/submit(\?|$)|\/api\/krillion\/(blitz\/)?answer(\?|$)/.test(url)) {
       const body = JSON.parse(init?.body ?? "{}");
       const { accepted, answer, tier, score, points, correction } = await response.clone().json();
       post("submit", { guess: body.answer, accepted, answer, tier, score: score ?? points, correction });

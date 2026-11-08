@@ -30,10 +30,15 @@
 
   const PLAYDAILY = location.hostname === "playdaily.org";
   const isDaily = () => !PLAYDAILY && location.pathname === "/";
+  // Krillocity is playdaily.org's rapid-fire race: every accepted answer counts, so a
+  // used suggestion leaves the list whether or not it was accepted.
+  const inRace = () => PLAYDAILY && /^\/krillocity\/?$/.test(location.pathname);
 
   // playdaily.org has other games, and its 1 vs 1 and multiplayer play real people.
+  // In Krillocity only the solo daily race counts; open races have other racers' lanes.
   function inDive() {
     if (!PLAYDAILY) return document.querySelector(".ds-score-pod") && !document.querySelector(".ds-begin-btn");
+    if (inRace()) return document.querySelector(".kb-stage .kr-prompt") && document.querySelectorAll(".kb-race-tag").length <= 1;
     if (!/^\/krillion\/?$/.test(location.pathname)) return false;
     return document.querySelector(".kr-stage .kr-prompt") && !document.querySelector(".kr-stage-multi, .kd-stage");
   }
@@ -129,7 +134,7 @@
       const left = suggestions.length - Math.min(suggestions.length, VISIBLE);
       const rejected = rejectedCount ? `${rejectedCount} not accepted. ` : "";
       const more = left ? `${left} more ready. ` : "";
-      panel.append(el("p", "kh-hint", `${rejected}${more}Press its number to fill it. Enter dives.`));
+      panel.append(el("p", "kh-hint", `${rejected}${more}Press its number to fill it. Enter ${inRace() ? "swims" : "dives"}.`));
     }
     if (lastResult) {
       const result = el("p", "kh-result");
@@ -246,11 +251,15 @@
         rememberSeen(payload.answer, payload.tier);
       } else if (!payload.correction) {
         rememberSeen(payload.guess, null);
-        const guess = String(payload.guess).trim().toLowerCase();
-        const remaining = suggestions.filter((s) => s.name.toLowerCase() !== guess);
+      }
+      // A rejected answer leaves the list. In a race an accepted one does too, since
+      // the next answer is wanted straight away.
+      if (!payload.correction && (!payload.accepted || inRace())) {
+        const used = [payload.guess, payload.answer].filter(Boolean).map((a) => String(a).trim().toLowerCase());
+        const remaining = suggestions.filter((s) => !used.includes(s.name.toLowerCase()));
         if (remaining.length < suggestions.length) {
           suggestions = remaining;
-          rejectedCount++;
+          if (!payload.accepted) rejectedCount++;
           if (!suggestions.length) status = { text: "Out of suggestions. Try your own answer." };
         }
       }
