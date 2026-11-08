@@ -1,5 +1,5 @@
 import { buildDeepQuery, buildQuery, buildSurvivalQuery, getCandidates } from "./lib/candidates.js";
-import { applyGrades, rankForDeepTiers, rankForSurvival, startGrading } from "./lib/grading.js";
+import { applyGrades, rankForSurvival, startGrading } from "./lib/grading.js";
 import { addReveal, applyKnown, merge, promptKey, recordAnswers } from "./lib/book.js";
 import { describeError } from "./lib/messages.js";
 import { makeUrgent } from "./lib/claude.js";
@@ -65,7 +65,10 @@ async function generate(prompt, party, sender, exclude = [], job = { urgent: tru
   const entry = book[promptKey(prompt)];
   const deep = bookName !== "book";
   const query = party ? buildSurvivalQuery : deep ? buildDeepQuery : buildQuery;
-  const rank = party ? rankForSurvival : deep ? rankForDeepTiers : applyGrades;
+  // playdaily.org gets its own deeper answers, ranked the same way as krillion.io:
+  // playing dives through its API, that scored 73 points a prompt against 64 for a
+  // ranking tuned to its doubled points, with Schoolers falling from 5 in 21 to 1.
+  const rank = party ? rankForSurvival : applyGrades;
 
   // A room uses answers up, so Puffer Party always needs more than the book holds.
   if (!party && entry?.gems?.length) return { suggestions: merge(entry, []), note: "Seen before. From your answer book." };

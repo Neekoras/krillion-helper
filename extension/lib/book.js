@@ -5,7 +5,7 @@ const PROMPTS_PER_DIVE = 7;
 const METERS_PER_POINT = 10;
 const MAX_SEEN_PER_PROMPT = 300;
 const TIER_POINTS = { krillion: 100, deepcut: 85, rare: 60, schooler: 30, tooclever: 15, plankton: 10 };
-const RARE_POINTS = TIER_POINTS.rare;
+const DEEPCUT_POINTS = TIER_POINTS.deepcut;
 
 export function promptKey(prompt) {
   return prompt.trim().toLowerCase().replace(/\s+/g, " ");
@@ -70,8 +70,9 @@ export function recordAnswers(seen, items) {
 }
 
 // Labels suggestions with what play has shown, drops known misses and adds known
-// answers. Puffer Party wants any known answer first because it is safe. A dive
-// only wants the valuable ones first, and low tiers last.
+// answers. Puffer Party wants any known answer first because it is safe. In a dive a
+// fresh suggestion lands a Deep Cut more often than not, so only a known Deep Cut or
+// gem goes ahead of it, and a known Rare or lower goes last.
 export function applyKnown(entry, suggestions, { party = false } = {}) {
   if (!entry) return suggestions;
   const used = new Set();
@@ -89,7 +90,7 @@ export function applyKnown(entry, suggestions, { party = false } = {}) {
   const weight = (s) => {
     if (!s.tier) return 0;
     const points = TIER_POINTS[s.tier] ?? 1;
-    return party || points >= RARE_POINTS ? points : -1;
+    return party || points >= DEEPCUT_POINTS ? points : points - 1000;
   };
   return out.map((s, i) => ({ s, i })).sort((a, b) => weight(b.s) - weight(a.s) || a.i - b.i).map(({ s }) => s);
 }

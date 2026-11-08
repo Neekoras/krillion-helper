@@ -14,7 +14,7 @@ A personal Chrome extension that suggests obscure answers while you play [Krilli
 - **Answer book:** when you finish a dive, the game shows that dive's answers. The extension saves the top answer and some Deep Cuts for each prompt and shows them first if the prompt comes up again.
 - **Known answers:** the extension remembers, per question, the answers it sees during play: tiers for accepted answers, and which ones were rejected. If a question comes up again, known answers show their tier and known misses are left out. This only uses what the game already shows you, and it never looks up answer lists.
 - **Where it runs:** Unlimited, Archive and themed packs. On the Daily Dive, suggestions stay off until you turn them on from the panel. In Puffer Party, it runs in hosted public and private rooms during a round. Rated and Quick Play stay off.
-- **playdaily.org:** dives at playdaily.org/krillion, Classic and Endless, also get suggestions, ranked for that site's steeper points. It keeps its own saved answers, separate from krillion.io, and doesn't count toward the toolbar popup. Its 1 vs 1 and multiplayer stay off.
+- **playdaily.org:** dives at playdaily.org/krillion, Classic and Endless, also get suggestions, from a deeper answer request. It keeps its own saved answers, separate from krillion.io, and doesn't count toward the toolbar popup. Its 1 vs 1 and multiplayer stay off.
 - **Toolbar popup:** shows your dive pace on a water column, how many answers landed in each tier, and a switch for the Daily Dive.
 - **Puffer Party:** suggests answers for the current category, safest first, and removes anything already accepted or missed by anyone in the room. When fewer than six are left, it asks Claude for more answers nobody has used, and stops only when Claude has nothing new for that category. Clicking one fills the answer box at any point in the round, so you can have it ready before your turn. It reads the game's room messages but never sends anything or submits for you.
 
@@ -81,6 +81,7 @@ Learned from six Classic dives on playdaily.org, a separate game with different 
 - Playing the top suggestions, the deeper ranking scored 320 and 484 out of 700, and the krillion.io ranking scored 356 and 352. Those were different prompts in each dive, so this is a small sample.
 
 - Tiers are worth 4, 8, 16, 32, 64 and 100 points, so obscurity pays much more than on krillion.io.
+- Played through its API with Claude (35 prompts a side), the krillion.io ranking by obscurity squared scored 73 points a prompt and a ranking built for the doubled points scored 64, mostly by turning Schoolers into Deep Cuts. Almost every accepted answer was off the short list shown afterwards, so the site grades unlisted answers live.
 - A prompt can have several One in a Krillion answers, and the lists after a dive are short (25 to about 60 answers).
 - Answers not on those lists can still be accepted: Bublik scored Deep Cut for "a food that has a hole in it" but wasn't on the list shown.
 - Too Clever here is the answer that feels clever but many people give: Pomegranate for "a thing that contains seeds", Bahrain for "a country in the Middle East".
