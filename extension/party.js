@@ -17,6 +17,7 @@
   let suggestions = [];
   let status = null; // { text, needsKey?, searching? }
   let collapsed = false;
+  let enabled = true; // the popup's Puffer Party switch; on unless turned off
   // The room uses answers up, so the list keeps being topped up during a category.
   let fetchingMore = false;
   let exhausted = false; // Claude had nothing new for this category
@@ -63,6 +64,27 @@
     return header;
   }
 
+  chrome.storage.local.get("partyEnabled").then((s) => {
+    enabled = s.partyEnabled !== false;
+    render();
+  });
+  chrome.storage.onChanged.addListener((changes) => {
+    if (!changes.partyEnabled) return;
+    enabled = changes.partyEnabled.newValue !== false;
+    if (enabled && isActive(room) && room.category !== requested) requestSuggestions(room.category);
+    render();
+  });
+
+  function renderOff() {
+    const box = el("div", "kh-status");
+    box.append(el("span", "", "Suggestions are off for Puffer Party."));
+    const button = el("button", "kh-action", "Turn on for Puffer Party");
+    button.type = "button";
+    button.addEventListener("click", () => chrome.storage.local.set({ partyEnabled: true }));
+    box.append(button);
+    return box;
+  }
+
   function renderStatus() {
     const box = el("div", "kh-status");
     if (status.searching) box.classList.add("kh-searching");
@@ -98,6 +120,10 @@
     panel.replaceChildren(renderHeader());
     panel.classList.toggle("kh-collapsed", collapsed);
     if (collapsed) return;
+    if (!enabled) {
+      panel.append(renderOff());
+      return;
+    }
 
     if (status) panel.append(renderStatus());
     const left = remaining(room, suggestions);
@@ -155,7 +181,7 @@
   // request is tried again after a pause, since room messages keep calling this.
   async function topUp() {
     const category = requested;
-    if (!category || !isActive(room) || fetchingMore || exhausted || status?.searching || status?.needsKey) return;
+    if (!enabled || !category || !isActive(room) || fetchingMore || exhausted || status?.searching || status?.needsKey) return;
     if (Date.now() < retryAt || remaining(room, suggestions).length >= VISIBLE) return;
     fetchingMore = true;
     render();
@@ -190,7 +216,7 @@
       requested = null;
       suggestions = [];
       status = null;
-    } else if (room.category !== requested) {
+    } else if (enabled && room.category !== requested) {
       requestSuggestions(room.category);
     }
     render();
@@ -212,7 +238,7 @@
   document.addEventListener(
     "keydown",
     (event) => {
-      if (panel.hidden || collapsed) return;
+      if (panel.hidden || collapsed || !enabled) return;
       const number = suggestionNumber(event, answerBox());
       const suggestion = number && remaining(room, suggestions).slice(0, VISIBLE)[number - 1];
       if (!suggestion) return;

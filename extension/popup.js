@@ -12,7 +12,7 @@ const BANDS = [
 const PIXELS_PER_METER = 0.05;
 const meters = (n) => `${n.toLocaleString("en-US")}m`;
 
-const stored = await chrome.storage.local.get(["anthropicKey", "dailyEnabled", "results", "book"]);
+const stored = await chrome.storage.local.get(["anthropicKey", "dailyEnabled", "partyEnabled", "results", "book"]);
 const stats = summarize(stored.results ?? []);
 
 const paceEl = document.getElementById("pace");
@@ -71,6 +71,11 @@ document.getElementById("options").addEventListener("click", () => chrome.runtim
 const daily = document.getElementById("daily");
 daily.checked = Boolean(stored.dailyEnabled);
 daily.addEventListener("change", () => chrome.storage.local.set({ dailyEnabled: daily.checked }));
+
+// Puffer Party is on unless it has been turned off.
+const party = document.getElementById("party");
+party.checked = stored.partyEnabled !== false;
+party.addEventListener("change", () => chrome.storage.local.set({ partyEnabled: party.checked }));
 
 const prompts = Object.keys(stored.book ?? {}).length;
 document.getElementById("book").textContent = `Answer book: ${prompts} ${prompts === 1 ? "prompt" : "prompts"}`;
