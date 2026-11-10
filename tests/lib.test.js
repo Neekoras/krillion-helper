@@ -37,6 +37,11 @@ test("letterRule checks spelling prompts letter by letter", () => {
   assert.equal(jkv("Vanuatu"), true);
   assert.equal(jkv("Tuvalu"), true);
   assert.equal(jkv("Chile"), false);
+  const secondO = letterRule("Name a country whose second letter is O");
+  assert.equal(secondO("Comoros"), true);
+  assert.equal(secondO("Côte d'Ivoire"), true);
+  assert.equal(secondO("Mauritius"), false);
+  assert.equal(letterRule("Name a word whose last letter is \u201cq\u201d")("Tranq"), true);
   assert.equal(letterRule("Name a hot drink"), null);
 });
 

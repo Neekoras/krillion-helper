@@ -124,6 +124,11 @@ export function letterRule(prompt) {
   }
   if ((m = q(/(?:ending|ends) (?:in|with) Q-?(\w+)Q/))) return (name) => plain(name).endsWith(plain(m[1]));
   if ((m = q(/(?:starting|starts|beginning|begins) with Q(\w+)Q/))) return (name) => plain(name).startsWith(plain(m[1]));
+  if ((m = /\b(first|second|third|fourth|fifth|last) letter is (?:an? )?Q?([A-Za-z])Q?\b/.exec(prompt.replace(new RegExp(QUOTE, "g"), "")))) {
+    const at = { first: 0, second: 1, third: 2, fourth: 3, fifth: 4 }[m[1]];
+    const letter = m[2].toLowerCase();
+    return (name) => { const n = plain(name).replace(/[^a-z]/g, ""); return (at === undefined ? n.at(-1) : n[at]) === letter; };
+  }
   if ((m = /contains? (?:the letters? )?((?:[A-Z],? (?:or )?)+[A-Z])\b/.exec(prompt))) {
     const letters = m[1].match(/[A-Z]/g).map((l) => l.toLowerCase());
     return (name) => letters.some((l) => plain(name).includes(l));
