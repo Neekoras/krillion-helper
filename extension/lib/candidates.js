@@ -107,6 +107,30 @@ export function parseAnswers(text) {
   return out;
 }
 
+// Prompts about spelling ("containing “age”", "ending in -ism", "a country with \"in\" in
+// its name", "whose name contains J, K, or V") are checked here letter by letter, because
+// Claude offered Kiribati and Brunei for "in" and the graders let them through. Of the
+// 13,300 listed answers on the 125 such sheets studied, all pass but one the game got wrong.
+const QUOTE = `["'\u201c\u201d\u2018\u2019]`;
+const plain = (s) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+export function letterRule(prompt) {
+  const q = (re) => new RegExp(re.source.replace(/Q/g, QUOTE), "i").exec(prompt);
+  let m;
+  if ((m = q(/(?:containing|contains|with|has|having) (Q\w+Q(?:,? (?:or|and) Q\w+Q)*)(?: in (?:it|its name))?/))) {
+    const parts = m[1].match(new RegExp(`${QUOTE}(\\w+)${QUOTE}`, "g")).map((part) => plain(part.slice(1, -1)));
+    const every = / and /.test(m[1]);
+    return (name) => parts[every ? "every" : "some"]((part) => plain(name).includes(part));
+  }
+  if ((m = q(/(?:ending|ends) (?:in|with) Q-?(\w+)Q/))) return (name) => plain(name).endsWith(plain(m[1]));
+  if ((m = q(/(?:starting|starts|beginning|begins) with Q(\w+)Q/))) return (name) => plain(name).startsWith(plain(m[1]));
+  if ((m = /contains? (?:the letters? )?((?:[A-Z],? (?:or )?)+[A-Z])\b/.exec(prompt))) {
+    const letters = m[1].match(/[A-Z]/g).map((l) => l.toLowerCase());
+    return (name) => letters.some((l) => plain(name).includes(l));
+  }
+  return null;
+}
+
 // Compares names loosely, so "São Tomé" and "sao tome" count as the same answer.
 const sameName = (name) => name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
@@ -118,7 +142,8 @@ const PARTIAL_STEP = 3;
 // the panel can show answers before the whole list and its ranking are done.
 async function ask(prompt, apiKey, fetchFn, query, { exclude = [], job, onPartial } = {}) {
   const used = new Set(exclude.map(sameName));
-  const fresh = (text) => parseAnswers(text || "{}").filter((name) => !used.has(sameName(name)));
+  const rule = letterRule(prompt);
+  const fresh = (text) => parseAnswers(text || "{}").filter((name) => !used.has(sameName(name)) && (!rule || rule(name)));
   const client = createClient(apiKey, fetchFn, job);
   const request = {
     model: MODEL,

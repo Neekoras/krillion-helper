@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildSurvivalQuery, getCandidates, parseAnswers } from "../extension/lib/candidates.js";
+import { buildSurvivalQuery, getCandidates, letterRule, parseAnswers } from "../extension/lib/candidates.js";
 import { applyGrades, buildRequest, grade, rankForSurvival, startGrading, toAnswers } from "../extension/lib/grading.js";
 import { addReveal, applyKnown, diveDepth, merge, promptKey, recordAnswers, summarize } from "../extension/lib/book.js";
 import { describeError } from "../extension/lib/messages.js";
@@ -19,6 +19,30 @@ test("parseAnswers keeps real names that repeat a word", () => {
 
 test("parseAnswers keeps the whole answers from a reply that was cut off", () => {
   assert.deepEqual(parseAnswers('{"answers":["Hafnium","Rhenium \\"Re\\"","Osmi'), ["Hafnium", 'Rhenium "Re"']);
+});
+
+test("letterRule checks spelling prompts letter by letter", () => {
+  const inName = letterRule('Name a country with "in" in its name');
+  assert.equal(inName("Liechtenstein"), true);
+  assert.equal(inName("Kiribati"), false);
+  assert.equal(letterRule("Name an English word containing \u201cough\u201d")("Brougham"), true);
+  assert.equal(letterRule("Name an English word ending in \u201c-ism\u201d")("Euphuism"), true);
+  assert.equal(letterRule("Name an English word ending in \u201c-ism\u201d")("Schism!"), false);
+  assert.equal(letterRule("Name an English word starting with \u201cdw\u201d")("Dwaum"), true);
+  const either = letterRule("Name an English word containing \u201castro\u201d or \u201caster\u201d");
+  assert.equal(either("Beemaster"), true);
+  assert.equal(either("Astrolabe"), true);
+  assert.equal(either("Satellite"), false);
+  const jkv = letterRule("Name a country whose English name contains J, K, or V");
+  assert.equal(jkv("Vanuatu"), true);
+  assert.equal(jkv("Tuvalu"), true);
+  assert.equal(jkv("Chile"), false);
+  assert.equal(letterRule("Name a hot drink"), null);
+});
+
+test("getCandidates drops answers that fail a spelling prompt", async () => {
+  const fetchFn = async () => claudeReply('{"answers":["Kiribati","Eswatini","Brunei","Benin","Liechtenstein","Spain","India","China","Finland","Guinea","Bahrain"]}');
+  assert.deepEqual(await getCandidates('Name a country with "in" in its name', "k", fetchFn), ["Eswatini", "Benin", "Liechtenstein", "Spain", "India", "China", "Finland", "Guinea", "Bahrain"]);
 });
 
 test("parseAnswers accepts a JSON string", () => {
