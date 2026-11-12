@@ -32,7 +32,10 @@ const GUIDELINES =
   `great ape; the game marks those down. "Country" means a sovereign state unless the ` +
   `prompt says otherwise, so territories and dependencies don't count. Before listing, ` +
   `work out exactly what the prompt requires (a size, a date, a category) and draw ` +
-  `answers from several different kinds of thing that meet it, not one narrow kind.`;
+  `answers from several different kinds of thing that meet it, not one narrow kind. ` +
+  `When the prompt asks for a type or kind of something, answer with general terms for ` +
+  `the kind, never with eponyms or cases named for one person, place or body part: ` +
+  `those are the specific instances the prompt rules out.`;
 
 // When every answer failed the fit check, the list is asked for again with the misses
 // shown, because Claude once listed only moons smaller than the Moon for "an object in
