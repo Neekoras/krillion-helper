@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildSurvivalQuery, getCandidates, letterRule, parseAnswers } from "../extension/lib/candidates.js";
+import { buildQuery, buildRetryQuery, buildSurvivalQuery, getCandidates, letterRule, parseAnswers } from "../extension/lib/candidates.js";
 import { applyGrades, buildRequest, grade, rankForSurvival, startGrading, toAnswers } from "../extension/lib/grading.js";
 import { addReveal, applyKnown, diveDepth, merge, promptKey, recordAnswers, summarize } from "../extension/lib/book.js";
 import { describeError } from "../extension/lib/messages.js";
@@ -48,6 +48,13 @@ test("letterRule checks spelling prompts letter by letter", () => {
 test("getCandidates drops answers that fail a spelling prompt", async () => {
   const fetchFn = async () => claudeReply('{"answers":["Kiribati","Eswatini","Brunei","Benin","Liechtenstein","Spain","India","China","Finland","Guinea","Bahrain"]}');
   assert.deepEqual(await getCandidates('Name a country with "in" in its name', "k", fetchFn), ["Eswatini", "Benin", "Liechtenstein", "Spain", "India", "China", "Finland", "Guinea", "Bahrain"]);
+});
+
+test("buildRetryQuery shows the misses and asks for the conditions to be re-read", () => {
+  const q = buildRetryQuery("Name an object in space bigger than the Moon", ["Mimas", "Phoebe"]);
+  assert.ok(q.startsWith(buildQuery("Name an object in space bigger than the Moon")));
+  assert.match(q, /failed every answer: Mimas, Phoebe\./);
+  assert.match(q, /exact conditions/);
 });
 
 test("parseAnswers accepts a JSON string", () => {

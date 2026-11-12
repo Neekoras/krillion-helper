@@ -1,5 +1,5 @@
-import { buildDeepQuery, buildQuery, buildSurvivalQuery, getCandidates } from "./lib/candidates.js";
-import { applyGrades, rankForSurvival, startGrading } from "./lib/grading.js";
+import { buildDeepQuery, buildQuery, buildRetryQuery, buildSurvivalQuery, getCandidates } from "./lib/candidates.js";
+import { applyGrades, grade, rankForSurvival, startGrading } from "./lib/grading.js";
 import { addReveal, applyKnown, merge, promptKey, recordAnswers } from "./lib/book.js";
 import { describeError } from "./lib/messages.js";
 import { makeUrgent } from "./lib/claude.js";
@@ -100,7 +100,15 @@ async function generate(prompt, party, sender, exclude = [], job = { urgent: tru
 
     try {
       const graded = await grading.finish(candidates, rank, cutoff);
-      return { suggestions: merge(entry, graded.length ? graded : candidates, Infinity) };
+      if (graded.length) return { suggestions: merge(entry, graded, Infinity) };
+      // Every answer failed the fit check, so a wrong reading of the prompt is likelier
+      // than 30 bad answers. One more list, with the misses shown, is worth the wait.
+      if (!party) {
+        const again = await getCandidates(prompt, anthropicKey, fetch, (p) => buildRetryQuery(p, candidates), { job });
+        const ranked = again.length ? await grade(prompt, again, anthropicKey, fetch, rank, job) : [];
+        if (ranked.length) return { suggestions: merge(entry, ranked, Infinity) };
+      }
+      return { suggestions: merge(entry, candidates, Infinity), note: "None of these may fit. Check them first." };
     } catch {
       return { suggestions: merge(entry, candidates, Infinity), note: "Couldn't rank these, so check them first." };
     }

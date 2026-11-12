@@ -29,7 +29,21 @@ const GUIDELINES =
   `spelling prompt, rarer means a word that almost never appears in modern writing: ` +
   `archaic, dialect and technical dictionary words beat long famous ones. Never give ` +
   `the famous "obscure" picks, such as Antidisestablishmentarianism or Human for a ` +
-  `great ape; the game marks those down.`;
+  `great ape; the game marks those down. "Country" means a sovereign state unless the ` +
+  `prompt says otherwise, so territories and dependencies don't count. Before listing, ` +
+  `work out exactly what the prompt requires (a size, a date, a category) and draw ` +
+  `answers from several different kinds of thing that meet it, not one narrow kind.`;
+
+// When every answer failed the fit check, the list is asked for again with the misses
+// shown, because Claude once listed only moons smaller than the Moon for "an object in
+// space bigger than Earth's Moon".
+export function buildRetryQuery(prompt, misses) {
+  return (
+    `${buildQuery(prompt)}\n\nAn earlier list for this prompt failed every answer: ` +
+    `${misses.slice(0, 8).join(", ")}. Re-read the prompt, state its exact conditions to ` +
+    `yourself, and give answers that clearly meet every one of them.`
+  );
+}
 
 export function buildQuery(prompt) {
   return (
