@@ -95,10 +95,21 @@ export function rankForSurvival(candidates, answers) {
     .map((c) => c.name);
 }
 
+// Two gradings of the same list often disagree about which answer is rarest. Grading
+// 98 saved lists three times each, the average of three scored 79.2 points a prompt
+// against 78.0 for one grading and 78.6 for two, so each batch is graded three times
+// at once and the scores are averaged. A prompt on its own is ranked just as fast (5 to
+// 7 seconds either way). A whole dive fetched together takes about twice as long to
+// finish, but the prompt on screen goes first in the queue.
+const GRADINGS = 3;
+
+const mean = (rows) => rows[0].map((_, k) => rows.reduce((sum, row) => sum + row[k], 0) / rows.length);
+
 // Grades names ten at a time as Claude writes them, so most of the list is graded by
 // the time it's finished. finish() grades the rest and ranks what has been graded when
 // every batch is back, or when cutoff settles, leaving out answers still waiting.
-export function startGrading(prompt, apiKey, fetchFn = fetch, job) {
+// A batch only fails if every one of its gradings does.
+export function startGrading(prompt, apiKey, fetchFn = fetch, job, gradings = GRADINGS) {
   const client = createClient(apiKey, fetchFn, job);
   const scores = new Map();
   const asked = new Set();
@@ -112,12 +123,18 @@ export function startGrading(prompt, apiKey, fetchFn = fetch, job) {
     const request = buildRequest(prompt, batch, first);
     const offset = first;
     first += batch.length;
-    batches.push(
+    const copies = Array.from({ length: gradings }, () =>
       client.messages.create(request, { timeout: TIMEOUT_MS }).then((message) => {
         if (message.stop_reason !== "end_turn") throw new Error(`Grading stopped early: ${message.stop_reason}`);
         for (const [i, grades] of Object.entries(JSON.parse(replyText(message)))) {
-          if (grades.length === 3) scores.set(batch[Number(i) - offset], grades);
+          const name = batch[Number(i) - offset];
+          if (grades.length === 3) scores.set(name, [...(scores.get(name) ?? []), grades]);
         }
+      }),
+    );
+    batches.push(
+      Promise.allSettled(copies).then((results) => {
+        if (results.every((r) => r.status === "rejected")) throw results[0].reason;
       }),
     );
     return true;
@@ -135,7 +152,7 @@ export function startGrading(prompt, apiKey, fetchFn = fetch, job) {
       if ((await Promise.race([all, cutoff.then(() => "cut off")])) !== "done" && !scores.size) {
         throw new Error("Ranking took too long");
       }
-      const graded = candidates.flatMap((name, i) => (scores.has(name) ? [[i, scores.get(name)]] : []));
+      const graded = candidates.flatMap((name, i) => (scores.has(name) ? [[i, mean(scores.get(name))]] : []));
       return rank(candidates, toAnswers(Object.fromEntries(graded)));
     },
   };

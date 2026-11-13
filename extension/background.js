@@ -76,8 +76,9 @@ async function generate(prompt, party, sender, exclude = [], job = { urgent: tru
     return { suggestions: merge(entry, []), note: "Suggestions need an Anthropic key.", needsKey: true };
   }
 
-  // Grading starts while Claude is still writing the list.
-  const grading = startGrading(prompt, anthropicKey, fetch, job);
+  // Grading starts while Claude is still writing the list. A Puffer Party room needs its
+  // answers fast and only has to be accepted, so it settles for one grading.
+  const grading = startGrading(prompt, anthropicKey, fetch, job, party ? 1 : undefined);
   let written = [];
   const onPartial = (names) => {
     written = names;

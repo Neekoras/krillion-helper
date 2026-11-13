@@ -284,7 +284,7 @@ test("applyGrades removes a candidate Claude didn't grade", () => {
   assert.deepEqual(applyGrades(["Skipped", "Chai"], answers), ["Chai"]);
 });
 
-test("grade sends one request per batch of ten and ranks every batch together", async () => {
+test("grade sends three requests per batch of ten and ranks every batch together", async () => {
   const candidates = Array.from({ length: 12 }, (_, i) => `Tea ${i}`);
   const bodies = [];
   const fetchFn = async (_url, init) => {
@@ -294,8 +294,8 @@ test("grade sends one request per batch of ten and ranks every batch together", 
     return claudeReply(JSON.stringify(Object.fromEntries(numbers.map((n) => [n, [0.9, Number(n) === 11 ? 3 : 1, 0.9]]))));
   };
   const order = await grade("Name a tea", candidates, "k", fetchFn);
-  assert.equal(bodies.length, 2);
-  assert.deepEqual(bodies[1].output_config.format.schema.required, ["10", "11"]);
+  assert.equal(bodies.length, 6);
+  assert.deepEqual(bodies[5].output_config.format.schema.required, ["10", "11"]);
   assert.equal(order[0], "Tea 11");
   assert.equal(order.length, 12);
 });
@@ -319,9 +319,9 @@ test("startGrading grades ten names at a time as they arrive", async () => {
   assert.equal(sent.length, 0);
   grading.add(names.slice(0, 21));
   await settle();
-  assert.equal(sent.length, 2);
+  assert.equal(sent.length, 6);
   const order = await grading.finish(names);
-  assert.equal(sent.length, 3);
+  assert.equal(sent.length, 9);
   assert.equal(order.length, 23);
   assert.equal(order[0], "Tea 1");
 });
@@ -335,6 +335,20 @@ test("startGrading ranks what's graded at the cutoff and leaves out the rest", a
   const order = await grading.finish(names, undefined, new Promise((r) => setTimeout(r, 20)));
   assert.equal(order.length, 10);
   assert.equal(order[0], "Tea 1");
+});
+
+test("startGrading averages its gradings and survives one that fails", async () => {
+  // Sencha wins one grading by a lot and loses the other narrowly; a third fails.
+  const replies = ['{"0":[0.9,3,0.9],"1":[0.9,1,0.9]}', '{"0":[0.9,1.5,0.9],"1":[0.9,2,0.9]}'];
+  let calls = 0;
+  const fetchFn = async () => (calls++ < 2 ? claudeReply(replies[calls - 1]) : claudeError(529, "overloaded_error"));
+  assert.deepEqual(await grade("Name a tea", ["Sencha", "Chai"], "k", fetchFn), ["Sencha", "Chai"]);
+});
+
+test("startGrading grades once when asked to", async () => {
+  const sent = [];
+  await startGrading("Name a tea", "k", gradeAll(sent), undefined, 1).finish(["Tea 0", "Tea 1"]);
+  assert.equal(sent.length, 1);
 });
 
 test("startGrading gives up if nothing is graded by the cutoff", async () => {
