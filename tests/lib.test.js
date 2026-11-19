@@ -1,115 +1,337 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getCandidates, parseAnswers } from "../extension/lib/candidates.js";
-import { applyGrades, buildRequest, grade } from "../extension/lib/luna.js";
-import { addReveal, diveDepth, merge, promptKey, summarize } from "../extension/lib/book.js";
+import { buildQuery, buildRetryQuery, buildSafeQuery, getCandidates, letterRule, parseAnswers } from "../extension/lib/candidates.js";
+import { applyGrades, buildRequest, grade, startGrading, toAnswers } from "../extension/lib/grading.js";
+import { addReveal, applyKnown, diveDepth, merge, promptKey, recordAnswers, summarize } from "../extension/lib/book.js";
 import { describeError } from "../extension/lib/messages.js";
+import { createClient, makeUrgent } from "../extension/lib/claude.js";
+import { APIConnectionTimeoutError, AuthenticationError, RateLimitError } from "../extension/vendor/anthropic-sdk.js";
 
 test("parseAnswers removes duplicates and padded names", () => {
   const out = parseAnswers({ answers: ["Sahlab", " sahlab ", "Hominidae hominidae", "Egad", ""] });
   assert.deepEqual(out, ["Sahlab", "Egad"]);
 });
 
+test("parseAnswers keeps real names that repeat a word", () => {
+  const names = ["Hori hori", "Miaow Miaow", "Yo Yo Honey Singh", "Feast of Saint Francis of Assisi"];
+  assert.deepEqual(parseAnswers({ answers: names }), names);
+});
+
+test("parseAnswers keeps the whole answers from a reply that was cut off", () => {
+  assert.deepEqual(parseAnswers('{"answers":["Hafnium","Rhenium \\"Re\\"","Osmi'), ["Hafnium", 'Rhenium "Re"']);
+});
+
+test("letterRule checks spelling prompts letter by letter", () => {
+  const inName = letterRule('Name a country with "in" in its name');
+  assert.equal(inName("Liechtenstein"), true);
+  assert.equal(inName("Kiribati"), false);
+  assert.equal(letterRule("Name an English word containing \u201cough\u201d")("Brougham"), true);
+  assert.equal(letterRule("Name an English word ending in \u201c-ism\u201d")("Euphuism"), true);
+  assert.equal(letterRule("Name an English word ending in \u201c-ism\u201d")("Schism!"), false);
+  assert.equal(letterRule("Name an English word starting with \u201cdw\u201d")("Dwaum"), true);
+  const either = letterRule("Name an English word containing \u201castro\u201d or \u201caster\u201d");
+  assert.equal(either("Beemaster"), true);
+  assert.equal(either("Astrolabe"), true);
+  assert.equal(either("Satellite"), false);
+  const jkv = letterRule("Name a country whose English name contains J, K, or V");
+  assert.equal(jkv("Vanuatu"), true);
+  assert.equal(jkv("Tuvalu"), true);
+  assert.equal(jkv("Chile"), false);
+  const secondO = letterRule("Name a country whose second letter is O");
+  assert.equal(secondO("Comoros"), true);
+  assert.equal(secondO("Côte d'Ivoire"), true);
+  assert.equal(secondO("Mauritius"), false);
+  assert.equal(letterRule("Name a word whose last letter is \u201cq\u201d")("Tranq"), true);
+  assert.equal(letterRule("Name a hot drink"), null);
+});
+
+test("getCandidates drops answers that fail a spelling prompt", async () => {
+  const fetchFn = async () => claudeReply('{"answers":["Kiribati","Eswatini","Brunei","Benin","Liechtenstein","Spain","India","China","Finland","Guinea","Bahrain"]}');
+  assert.deepEqual(await getCandidates('Name a country with "in" in its name', "k", fetchFn), ["Eswatini", "Benin", "Liechtenstein", "Spain", "India", "China", "Finland", "Guinea", "Bahrain"]);
+});
+
+test("buildRetryQuery shows the misses and asks for the conditions to be re-read", () => {
+  const q = buildRetryQuery("Name an object in space bigger than the Moon", ["Mimas", "Phoebe"]);
+  assert.ok(q.startsWith(buildQuery("Name an object in space bigger than the Moon")));
+  assert.match(q, /failed every answer: Mimas, Phoebe\./);
+  assert.match(q, /exact conditions/);
+});
+
 test("parseAnswers accepts a JSON string", () => {
   assert.deepEqual(parseAnswers('{"answers":["Furmint"]}'), ["Furmint"]);
 });
 
-test("getCandidates reports API errors", async () => {
-  const fetchFn = async () => ({ ok: false, status: 401 });
-  await assert.rejects(getCandidates("Name a tea", "k", fetchFn), /Luna returned 401/);
-});
+// A Messages API reply as the SDK receives it over fetch.
+const claudeReply = (text, stop_reason = "end_turn") =>
+  new Response(
+    JSON.stringify({
+      id: "msg_test",
+      type: "message",
+      role: "assistant",
+      model: "claude-sonnet-5-5",
+      content: [{ type: "thinking", thinking: "", signature: "s" }, { type: "text", text }],
+      stop_reason,
+      usage: { input_tokens: 1, output_tokens: 1 },
+    }),
+    { status: 200, headers: { "content-type": "application/json" } },
+  );
 
-test("getCandidates reads Responses output and retries an empty list", async () => {
-  const reply = (answers) => ({
-    output: [
-      { type: "reasoning" },
-      { type: "message", content: [{ type: "output_text", text: JSON.stringify({ answers }) }] },
-    ],
+// A streamed Messages API reply, sending the text in the given pieces.
+const claudeStream = (pieces) => {
+  const event = (type, data) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
+  const body = [
+    event("message_start", { message: { id: "msg_test", type: "message", role: "assistant", model: "claude-sonnet-5-5", content: [], stop_reason: null, usage: { input_tokens: 1, output_tokens: 0 } } }),
+    event("content_block_start", { index: 0, content_block: { type: "text", text: "" } }),
+    ...pieces.map((text) => event("content_block_delta", { index: 0, delta: { type: "text_delta", text } })),
+    event("content_block_stop", { index: 0 }),
+    event("message_delta", { delta: { stop_reason: "end_turn" }, usage: { output_tokens: 1 } }),
+    event("message_stop", {}),
+  ].join("");
+  return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+};
+
+const claudeError = (status, type, message = "test") =>
+  new Response(JSON.stringify({ type: "error", error: { type, message } }), {
+    status,
+    headers: { "content-type": "application/json" },
   });
-  const replies = [reply([]), reply(["Sahlab"])];
-  let calls = 0;
-  const urls = [];
-  const fetchFn = async (url) => {
-    urls.push(url);
-    return { ok: true, json: async () => replies[calls++] };
+
+test("getCandidates reports API errors", async () => {
+  const fetchFn = async () => claudeError(401, "authentication_error");
+  await assert.rejects(getCandidates("Name a tea", "k", fetchFn), AuthenticationError);
+});
+
+const tenTeas = JSON.stringify({ answers: Array.from({ length: 10 }, (_, i) => `Tea ${i}`) });
+
+test("getCandidates tops up a short list with safe answers", async () => {
+  const sent = [];
+  const fetchFn = async (url, init) => {
+    sent.push(JSON.parse(init.body).messages[0].content);
+    return claudeReply(sent.length === 1 ? '{"answers":["Barry Nelson"]}' : '{"answers":["Sean Connery","barry nelson","George Lazenby"]}');
   };
-  assert.deepEqual(await getCandidates("Name a tea", "k", fetchFn), ["Sahlab"]);
+  const prompt = "Name an actor who has played James Bond";
+  assert.deepEqual(await getCandidates(prompt, "k", fetchFn), ["Barry Nelson", "Sean Connery", "George Lazenby"]);
+  assert.equal(sent[1], buildSafeQuery(prompt));
+});
+
+test("getCandidates keeps a short list if the top-up fails", async () => {
+  let calls = 0;
+  const fetchFn = async () => (++calls === 1 ? claudeReply('{"answers":["Barry Nelson"]}') : claudeError(529, "overloaded_error"));
+  assert.deepEqual(await getCandidates("Name a Bond actor", "k", fetchFn), ["Barry Nelson"]);
+});
+
+test("getCandidates doesn't top up a long list or a safe one", async () => {
+  let calls = 0;
+  const fetchFn = async () => (calls++, claudeReply(calls === 1 ? tenTeas : '{"answers":["Sencha"]}'));
+  assert.equal((await getCandidates("Name a tea", "k", fetchFn)).length, 10);
+  calls = 1;
+  assert.deepEqual(await getCandidates("Name a tea", "k", fetchFn, buildSafeQuery), ["Sencha"]);
   assert.equal(calls, 2);
-  assert.equal(urls[0], "https://api.openai.com/v1/responses");
 });
 
-const grades = (rows) =>
-  rows.flatMap(([, listed, score, fits], i) => [
-    { type: "predicate", name: `listed_${i}`, probability: listed },
-    { type: "score", name: `obscure_${i}`, score },
-    { type: "predicate", name: `fits_${i}`, probability: fits },
-  ]);
-
-test("buildRequest asks three named questions per candidate", () => {
-  const req = buildRequest("Name a tea", ["Sencha", "Gyokuro"]);
-  assert.equal(req.model, "gpt-6-luna");
-  assert.equal(req.questions.length, 6);
-  assert.equal(req.questions[3].name, "listed_1");
-  assert.equal(req.questions[3].type, "predicate");
-  assert.equal(req.questions[1].levels.length, 4);
-  assert.ok(req.questions[1].levels[0].label);
-  assert.equal(req.questions[5].name, "fits_1");
+test("getCandidates shows names as they stream in, a few at a time", async () => {
+  const names = Array.from({ length: 10 }, (_, i) => `Tea ${i}`);
+  const pieces = ['{"answers":[', ...names.map((n, i) => `${i ? "," : ""}"${n}"`), "]}"];
+  const partials = [];
+  const out = await getCandidates("Name a tea", "k", async () => claudeStream(pieces), undefined, { onPartial: (p) => partials.push(p.length) });
+  assert.deepEqual(out, names);
+  assert.deepEqual(partials, [3, 6, 9]);
 });
 
-test("applyGrades favors likely-listed answers over merely obscure ones", () => {
+test("requests for the prompt on screen jump the queue", async () => {
+  const gates = [];
+  const started = [];
+  const fetchFn = (_url, init) => {
+    started.push(JSON.parse(init.body).messages[0].content);
+    return new Promise((resolve) => gates.push(() => resolve(claudeReply("ok"))));
+  };
+  const send = (name, job) => createClient("k", fetchFn, job).messages.create({ model: "m", max_tokens: 1, messages: [{ role: "user", content: name }] });
+  const early = { urgent: false };
+  const all = Array.from({ length: 10 }, (_, i) => send(`busy ${i}`, early));
+  const onScreen = { urgent: false };
+  all.push(send("on screen", onScreen));
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(started.length, 8, "early requests leave places free for the screen");
+  makeUrgent(onScreen);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(started.at(-1), "on screen");
+  gates.shift()();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(started.length, 9, "early requests stay within their share");
+  while (gates.length) gates.shift()(), await new Promise((r) => setTimeout(r, 5));
+  await Promise.all(all);
+});
+
+test("getCandidates reads Claude's answers and retries an empty list", async () => {
+  const replies = [claudeReply('{"answers":[]}'), claudeReply(tenTeas)];
+  const sent = [];
+  const fetchFn = async (url, init) => {
+    sent.push({ url: String(url), init });
+    return replies[sent.length - 1];
+  };
+  assert.equal((await getCandidates("Name a tea", "secret", fetchFn))[0], "Tea 0");
+  assert.equal(sent.length, 2);
+  assert.equal(sent[0].url, "https://api.anthropic.com/v1/messages");
+  assert.equal(new Headers(sent[0].init.headers).get("authorization"), "Bearer secret");
+  const body = JSON.parse(sent[0].init.body);
+  assert.equal(body.model, "claude-sonnet-5-5");
+  assert.deepEqual(body.thinking, { type: "between_tools" });
+  assert.equal(body.output_config.format.type, "json_schema");
+});
+
+const grades = (rows) => toAnswers(Object.fromEntries(rows.map(([, listed, score, fits], i) => [i, [listed, score, fits]])));
+
+test("buildRequest numbers a batch from its first candidate and requires every one", () => {
+  const req = buildRequest("Name a tea", ["Sencha", "Gyokuro"], 10);
+  assert.equal(req.model, "claude-sonnet-5-5");
+  assert.deepEqual(req.thinking, { type: "between_tools" });
+  assert.match(req.messages[0].content, /10\. Sencha\n11\. Gyokuro/);
+  assert.deepEqual(req.output_config.format.schema.required, ["10", "11"]);
+});
+
+test("toAnswers skips a candidate whose scores came back incomplete", () => {
+  const answers = toAnswers({ 0: [0.9, 2, 0.8], 1: [0.5] });
+  assert.deepEqual(
+    answers.map((a) => a.name),
+    ["listed_0", "obscure_0", "fits_0"],
+  );
+});
+
+test("applyGrades ranks by obscurity squared times the chance of being listed", () => {
   const rows = [
     ["Invented tea", 0.3, 3, 0.9],
     ["Gyokuro", 0.95, 2.5, 0.9],
     ["Coffee", 1, 0, 0.9],
     ["Sencha", 0.95, 1.5, 0.9],
   ];
-  assert.deepEqual(applyGrades(rows.map(([n]) => n), grades(rows)), ["Gyokuro", "Sencha", "Invented tea", "Coffee"]);
+  // A rejection only costs time, so a likely Deep Cut outranks a certain Rare.
+  assert.deepEqual(applyGrades(rows.map(([n]) => n), grades(rows)), ["Gyokuro", "Invented tea", "Sencha", "Coffee"]);
 });
 
 test("applyGrades removes only confident misses and doesn't rank by fit", () => {
   const rows = [
-    ["Saba", 0.95, 3, 0.05],
+    ["Saba", 0.95, 3, 0.01],
+    ["Low fit but listed", 0.95, 3, 0.05],
     ["Comoros", 0.9, 3, 0.2],
     ["France", 1, 0.5, 1],
   ];
-  assert.deepEqual(applyGrades(rows.map(([n]) => n), grades(rows)), ["Comoros", "France"]);
+  assert.deepEqual(applyGrades(rows.map(([n]) => n), grades(rows)), ["Low fit but listed", "Comoros", "France"]);
 });
 
-test("applyGrades removes a candidate whose fit question was refused", () => {
-  const answers = [
-    { type: "predicate", name: "listed_0", probability: 1 },
-    { type: "score", name: "obscure_0", score: 3 },
-    { type: "refusal", name: "fits_0" },
-    { type: "predicate", name: "listed_1", probability: 0.5 },
-    { type: "score", name: "obscure_1", score: 1 },
-    { type: "predicate", name: "fits_1", probability: 0.9 },
+test("applyGrades keeps rewarding obscurity past enthusiast level", () => {
+  const rows = [
+    ["Enthusiast pick", 0.8, 2, 0.9],
+    ["Almost unknown", 0.7, 3, 0.9],
   ];
-  assert.deepEqual(applyGrades(["Rude word", "Chai"], answers), ["Chai"]);
+  assert.deepEqual(applyGrades(rows.map(([n]) => n), grades(rows)), ["Almost unknown", "Enthusiast pick"]);
 });
 
-test("grade sends the documented request to the Decisions API", async () => {
-  let sent;
-  const fetchFn = async (url, init) => {
-    sent = { url, init };
-    return {
-      ok: true,
-      json: async () => ({
-        answers: [
-          { type: "predicate", name: "listed_0", probability: 1 },
-          { type: "score", name: "obscure_0", score: 3 },
-          { type: "predicate", name: "fits_0", probability: 1 },
-        ],
-      }),
-    };
+test("getCandidates can ask for safe answers", async () => {
+  let body;
+  const fetchFn = async (_url, init) => {
+    body = JSON.parse(init.body);
+    return claudeReply('{"answers":["Green tea"]}');
   };
-  assert.deepEqual(await grade("Name a tea", ["Kuzuyu"], "secret", fetchFn), ["Kuzuyu"]);
-  assert.equal(sent.url, "https://api.openai.com/v1/decisions");
-  assert.equal(sent.init.headers.Authorization, "Bearer secret");
+  await getCandidates("Name a tea", "k", fetchFn, buildSafeQuery);
+  assert.equal(body.messages[0].content, buildSafeQuery("Name a tea"));
+  assert.doesNotMatch(body.messages[0].content, /would not think/);
 });
 
-test("grade reports Decisions API errors", async () => {
-  const fetchFn = async () => ({ ok: false, status: 429 });
-  await assert.rejects(grade("Name a tea", ["Kuzuyu"], "k", fetchFn), /Luna returned 429/);
+test("applyGrades removes a candidate Claude didn't grade", () => {
+  const answers = toAnswers({ 1: [0.5, 1, 0.9] });
+  assert.deepEqual(applyGrades(["Skipped", "Chai"], answers), ["Chai"]);
+});
+
+test("grade sends three requests per batch of ten and ranks every batch together", async () => {
+  const candidates = Array.from({ length: 12 }, (_, i) => `Tea ${i}`);
+  const bodies = [];
+  const fetchFn = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    bodies.push(body);
+    const numbers = body.output_config.format.schema.required;
+    return claudeReply(JSON.stringify(Object.fromEntries(numbers.map((n) => [n, [0.9, Number(n) === 11 ? 3 : 1, 0.9]]))));
+  };
+  const order = await grade("Name a tea", candidates, "k", fetchFn);
+  assert.equal(bodies.length, 6);
+  assert.deepEqual(bodies[5].output_config.format.schema.required, ["10", "11"]);
+  assert.equal(order[0], "Tea 11");
+  assert.equal(order.length, 12);
+});
+
+// Grades every requested number, with Tea 1 the most obscure.
+const gradeAll = (sent) => async (_url, init) => {
+  const body = JSON.parse(init.body);
+  sent?.push(body.messages[0].content);
+  const numbers = body.output_config.format.schema.required;
+  const names = [...body.messages[0].content.matchAll(/^(\d+)\. (.*)$/gm)].map((m) => m[2]);
+  return claudeReply(JSON.stringify(Object.fromEntries(numbers.map((n, i) => [n, [0.9, names[i] === "Tea 1" ? 3 : 1, 0.9]]))));
+};
+
+test("startGrading grades ten names at a time as they arrive", async () => {
+  const sent = [];
+  const grading = startGrading("Name a tea", "k", gradeAll(sent));
+  const names = Array.from({ length: 23 }, (_, i) => `Tea ${i}`);
+  const settle = () => new Promise((r) => setTimeout(r, 10));
+  grading.add(names.slice(0, 9));
+  await settle();
+  assert.equal(sent.length, 0);
+  grading.add(names.slice(0, 21));
+  await settle();
+  assert.equal(sent.length, 6);
+  const order = await grading.finish(names);
+  assert.equal(sent.length, 9);
+  assert.equal(order.length, 23);
+  assert.equal(order[0], "Tea 1");
+});
+
+test("startGrading ranks what's graded at the cutoff and leaves out the rest", async () => {
+  let calls = 0;
+  const graded = gradeAll();
+  const fetchFn = (url, init) => (++calls === 1 ? graded(url, init) : new Promise(() => {}));
+  const grading = startGrading("Name a tea", "k", fetchFn);
+  const names = Array.from({ length: 15 }, (_, i) => `Tea ${i}`);
+  const order = await grading.finish(names, undefined, new Promise((r) => setTimeout(r, 20)));
+  assert.equal(order.length, 10);
+  assert.equal(order[0], "Tea 1");
+});
+
+test("letterRule checks a named letter and a letter count", () => {
+  const b = letterRule("Name a country with the letter B in its name");
+  assert.deepEqual(["Eswatini", "Kiribati", "Antigua and Barbuda"].map(b), [false, true, true]);
+  const short = letterRule("Name a chemical element whose name has 6 or fewer letters");
+  assert.deepEqual(["Holmium", "Erbium", "Cesium"].map(short), [false, true, true]);
+  const both = letterRule("Name an English word ending in “ly” (5+ letters)");
+  assert.deepEqual(["Ugly", "Wily", "Gangly"].map(both), [false, false, true]);
+  assert.equal(letterRule("Name a way to sign off a letter or email"), null);
+});
+
+test("startGrading averages its gradings and survives one that fails", async () => {
+  // Sencha wins one grading by a lot and loses the other narrowly; a third fails.
+  const replies = ['{"0":[0.9,3,0.9],"1":[0.9,1,0.9]}', '{"0":[0.9,1.5,0.9],"1":[0.9,2,0.9]}'];
+  let calls = 0;
+  const fetchFn = async () => (calls++ < 2 ? claudeReply(replies[calls - 1]) : claudeError(529, "overloaded_error"));
+  assert.deepEqual(await grade("Name a tea", ["Sencha", "Chai"], "k", fetchFn), ["Sencha", "Chai"]);
+});
+
+test("startGrading grades once when asked to", async () => {
+  const sent = [];
+  await startGrading("Name a tea", "k", gradeAll(sent), undefined, 1).finish(["Tea 0", "Tea 1"]);
+  assert.equal(sent.length, 1);
+});
+
+test("startGrading gives up if nothing is graded by the cutoff", async () => {
+  const grading = startGrading("Name a tea", "k", () => new Promise(() => {}));
+  await assert.rejects(grading.finish(["Sencha"], undefined, Promise.resolve()), /too long/);
+});
+
+test("grade fails when Claude stops before finishing a batch", async () => {
+  const fetchFn = async () => claudeReply('{"0":[0.9,', "max_tokens");
+  await assert.rejects(grade("Name a tea", ["Kuzuyu"], "k", fetchFn), /stopped early/);
+});
+
+test("grade reports API errors", async () => {
+  const fetchFn = async () => claudeError(429, "rate_limit_error");
+  await assert.rejects(grade("Name a tea", ["Kuzuyu"], "k", fetchFn), RateLimitError);
 });
 
 const rounds = [
@@ -166,68 +388,49 @@ test("diveDepth matches the game's 7,000m floor", () => {
   assert.equal(diveDepth(85), 5950);
 });
 
-test("describeError tells the player what to do", () => {
-  assert.match(describeError(new Error("Luna returned 401")), /rejected your key/);
-  assert.match(describeError(new Error("Luna returned 429")), /out of credit/);
-  assert.match(describeError(new Error("The operation was aborted due to timeout")), /too long/);
-  assert.match(describeError(new TypeError("Failed to fetch")), /Can't reach/);
-  assert.match(describeError(new Error("Luna returned 500")), /returned an error/);
+test("describeError tells the player what to do", async () => {
+  const errorFrom = (fetchFn) => getCandidates("Name a tea", "k", fetchFn).catch((err) => err);
+  assert.match(describeError(await errorFrom(async () => claudeError(401, "authentication_error"))), /rejected your key/);
+  const broke = claudeError(400, "invalid_request_error", "Your credit balance is too low to access the Anthropic API.");
+  assert.match(describeError(await errorFrom(async () => broke)), /out of credits/);
+  assert.match(describeError(await errorFrom(async () => claudeError(400, "invalid_request_error"))), /returned an error/);
+  assert.match(describeError(await errorFrom(async () => claudeError(429, "rate_limit_error"))), /too fast/);
+  assert.match(describeError(await errorFrom(async () => { throw new TypeError("Failed to fetch"); })), /Can't reach/);
+  assert.match(describeError(await errorFrom(async () => claudeError(500, "api_error"))), /returned an error/);
+  assert.match(describeError(new APIConnectionTimeoutError()), /too long/);
 });
 
-await import("../extension/party-core.js");
-const { createRoom, applyMessage, isActive, remaining, normalizeAnswer } = globalThis.KrillionParty;
-const roundFields = { phase: "round", holderId: "a", category: { index: 1, text: "Name a tea", threshold: 11, accepted: 0 } };
-const snap = (isPrivate, fields = roundFields) => ({ t: "snap", room: { settings: { isPrivate }, players: [], events: [], ...fields } });
-
-test("party stays off unless the room says it is private", () => {
-  assert.equal(isActive(applyMessage(createRoom(), snap(true))), true);
-  assert.equal(isActive(applyMessage(createRoom(), snap(false))), false);
-  assert.equal(isActive(applyMessage(createRoom(), { t: "snap", room: roundFields })), false);
-  assert.equal(isActive(applyMessage(createRoom(), { t: "patch", patch: { set: roundFields } })), false);
+test("recordAnswers keeps tiers per question and a miss can't erase one", () => {
+  let seen = recordAnswers({}, [
+    { prompt: "Name a tea", name: "Gyokuro", tier: "krillion" },
+    { prompt: "Name a tea", name: "Banana", tier: null },
+    { prompt: "Name a dog", name: "Akita", tier: "rare" },
+  ]);
+  seen = recordAnswers(seen, [{ prompt: "name a  TEA", name: "gyokuro", tier: null }]);
+  assert.deepEqual(seen["name a tea"], { gyokuro: { name: "Gyokuro", tier: "krillion" }, banana: { tier: null } });
+  assert.deepEqual(seen["name a dog"], { akita: { name: "Akita", tier: "rare" } });
 });
 
-test("party turns off when a private room is switched to public", () => {
-  const room = applyMessage(createRoom(), snap(true));
-  applyMessage(room, { t: "patch", patch: { set: { settings: { isPrivate: false } } } });
-  assert.equal(isActive(room), false);
+test("recordAnswers lets an accepted answer replace an old miss", () => {
+  const seen = recordAnswers({ "name a tea": { chai: { tier: null } } }, [{ prompt: "Name a tea", name: "Chai", tier: "plankton" }]);
+  assert.equal(seen["name a tea"].chai.tier, "plankton");
 });
 
-test("party removes answers accepted or missed by anyone", () => {
-  const room = applyMessage(createRoom(), snap(true));
-  applyMessage(room, {
-    t: "patch",
-    patch: {
-      events: [
-        { kind: "pass", from: "a", to: "b", answer: "Gyokuro", tier: "deepcut" },
-        { kind: "reject", playerId: "b", text: "Hóji-cha", why: "miss" },
-      ],
-    },
-  });
-  const left = remaining(room, [{ name: "gyokuro" }, { name: "Hoji Cha" }, { name: "Sencha" }]);
-  assert.deepEqual(left, [{ name: "Sencha" }]);
+test("applyKnown puts only known Deep Cuts and gems ahead of fresh suggestions in a dive", () => {
+  const entry = {
+    "green tea": { name: "Green tea", tier: "plankton" },
+    oolong: { name: "Oolong", tier: "rare" },
+    kukicha: { name: "Kukicha", tier: "deepcut" },
+  };
+  const out = applyKnown(entry, [{ name: "Green tea" }, { name: "Sencha" }]);
+  assert.deepEqual(out, [
+    { name: "Kukicha", tier: "deepcut" },
+    { name: "Sencha" },
+    { name: "Oolong", tier: "rare" },
+    { name: "Green tea", tier: "plankton" },
+  ]);
 });
 
-test("party resets what was said when the category changes", () => {
-  const room = applyMessage(createRoom(), snap(true));
-  applyMessage(room, { t: "patch", patch: { events: [{ kind: "pass", answer: "Gyokuro" }] } });
-  applyMessage(room, { t: "patch", patch: { set: { category: { index: 2, text: "Name a dog" } } } });
-  assert.equal(room.category, "Name a dog");
-  assert.equal(room.said.size, 0);
-});
-
-test("party keeps what was said when only the accepted count changes", () => {
-  const room = applyMessage(createRoom(), snap(true));
-  applyMessage(room, { t: "patch", patch: { events: [{ kind: "pass", answer: "Gyokuro" }], set: { category: { index: 1, text: "Name a tea", accepted: 1 } } } });
-  assert.equal(room.said.has(normalizeAnswer("Gyokuro")), true);
-});
-
-test("party recovers said answers from players after reconnecting", () => {
-  const room = applyMessage(createRoom(), { t: "snap", room: { settings: { isPrivate: true }, ...roundFields, events: [], players: [{ lastAnswer: { text: "Bancha", tier: "rare" } }] } });
-  assert.equal(room.said.has("bancha"), true);
-});
-
-test("party turns off when the round ends", () => {
-  const room = applyMessage(createRoom(), snap(true));
-  applyMessage(room, { t: "patch", patch: { set: { phase: "over", holderId: null } } });
-  assert.equal(isActive(room), false);
+test("applyKnown leaves suggestions alone for a new question", () => {
+  assert.deepEqual(applyKnown(undefined, [{ name: "Sencha" }]), [{ name: "Sencha" }]);
 });

@@ -1,6 +1,8 @@
-// Asks GPT-6 Luna for obscure, real answers to a Krillion prompt.
+// Asks Claude for obscure, real answers to a Krillion prompt.
+import { MODEL, NO_THINKING, createClient, replyText } from "./claude.js";
 
-const TIMEOUT_MS = 12000;
+// Long enough to cover the wait in the queue when a whole dive is fetched early.
+const TIMEOUT_MS = 60000;
 
 const SCHEMA = {
   type: "object",
@@ -11,24 +13,100 @@ const SCHEMA = {
   additionalProperties: false,
 };
 
+// Thirty answers can all be written and graded within the eight seconds a list may
+// take. Replaying saved dives, ranking 30 scored the same as ranking 40.
+const COUNT = 30;
+
+// What the game's own answer sheets show (see the README): lists come from Wikipedia,
+// dictionaries and encyclopedias; the tier an answer lands in depends on the shape of
+// the list; and a quarter of rejected answers were listed under a shorter name.
+const GUIDELINES =
+  `The game accepts answers from a list built by merging Wikipedia, dictionaries and ` +
+  `encyclopedias, so every answer must be a real, well-documented entry; a doubtful one ` +
+  `is worth less than a solid one. Write each the way its article or dictionary ` +
+  `headword is titled: the plain name, with no article and no descriptor the prompt ` +
+  `already implies (write "Eephus" not "Eephus pitch", "Bootleg" not "Bootleg ` +
+  `recording"), unless the longer form is the real title. For a single-word or ` +
+  `spelling prompt, rarer means a word that almost never appears in modern writing: ` +
+  `archaic, dialect and technical dictionary words beat long famous ones. Never give ` +
+  `the famous "obscure" picks, such as Antidisestablishmentarianism or Human for a ` +
+  `great ape; the game marks those down. "Country" means a sovereign state unless the ` +
+  `prompt says otherwise, so territories and dependencies don't count. Before listing, ` +
+  `work out exactly what the prompt requires (a size, a date, a category) and draw ` +
+  `answers from several different kinds of thing that meet it, not one narrow kind. ` +
+  `When the prompt asks for a type or kind of something, answer with general terms for ` +
+  `the kind, never with eponyms or cases named for one person, place or body part: ` +
+  `those are the specific instances the prompt rules out.`;
+
+// When every answer failed the fit check, the list is asked for again with the misses
+// shown, because Claude once listed only moons smaller than the Moon for "an object in
+// space bigger than Earth's Moon".
+export function buildRetryQuery(prompt, misses) {
+  return (
+    `${buildQuery(prompt)}\n\nAn earlier list for this prompt failed every answer: ` +
+    `${misses.slice(0, 8).join(", ")}. Re-read the prompt, state its exact conditions to ` +
+    `yourself, and give answers that clearly meet every one of them.`
+  );
+}
+
 export function buildQuery(prompt) {
   return (
-    `Trivia prompt: "${prompt}". List 40 answers that most people would not think ` +
-    `of but that have their own Wikipedia article or appear on a Wikipedia list. ` +
-    `Use the common English name exactly as Wikipedia titles it, with no added ` +
-    `words or punctuation. Leave out famous examples. Every answer must strictly ` +
-    `satisfy the prompt.`
+    `Trivia prompt: "${prompt}". List ${COUNT} answers that most people would not think ` +
+    `of. Leave out famous examples. Favor answers enthusiasts know that have one vivid, ` +
+    `surprising fact or story behind them. Every answer must strictly satisfy the prompt.\n\n` +
+    GUIDELINES
+  );
+}
+
+// playdaily.org pays most for its rarest tiers and accepts answers beyond the lists
+// it shows, so this skips the Wikipedia limit and goes as deep as it can.
+export function buildDeepQuery(prompt) {
+  return (
+    `Trivia prompt: "${prompt}". List ${COUNT} real answers that almost nobody would think ` +
+    `of, starting with the rarest. Leave out famous examples and the usual "obscure" ` +
+    `picks that everyone reaches for. Use the plain common name, with no added words ` +
+    `or punctuation. Every answer must strictly satisfy the prompt.`
+  );
+}
+
+// A prompt with a short, closed list leaves few obscure answers, so this asks for answers
+// a broad reference list would certainly include, to fill the list out.
+export function buildSafeQuery(prompt) {
+  return (
+    `Trivia category: "${prompt}". List ${COUNT} answers that a broad reference list ` +
+    `of answers would certainly include, starting with the ones you are most sure ` +
+    `of. Skip the handful of answers everyone would say first; favor solid, moderately ` +
+    `well-known ones that most players wouldn't reach for. Use the plain ` +
+    `name most people would type, with no added words or punctuation. Every answer ` +
+    `must clearly satisfy the category in its most ordinary meaning.`
   );
 }
 
 // Models sometimes pad lists with doubled words such as "Hominidae hominidae".
+// Real names repeat words too: "Feast of Saint Francis of Assisi" isn't doubled at all,
+// and the doubled ones seen in real lists ("Hori hori", "Miaow Miaow") use short words.
+const MIN_PADDED_WORD = 6;
+
 function looksPadded(name) {
   const words = name.toLowerCase().split(/\s+/);
-  return new Set(words).size < words.length;
+  return words.some((word, i) => word === words[i + 1] && word.length >= MIN_PADDED_WORD);
+}
+
+// A reply can stop partway through the list. The answers that arrived whole are kept.
+function parseCutOff(text) {
+  const names = [...text.matchAll(/"((?:[^"\\]|\\.)*)"\s*[,\]]/g)].map((m) => JSON.parse(`"${m[1]}"`));
+  return { answers: names };
 }
 
 export function parseAnswers(text) {
-  const parsed = typeof text === "string" ? JSON.parse(text) : text;
+  let parsed = text;
+  if (typeof text === "string") {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = parseCutOff(text);
+    }
+  }
   const seen = new Set();
   const out = [];
   for (const raw of parsed?.answers ?? []) {
@@ -42,33 +120,106 @@ export function parseAnswers(text) {
   return out;
 }
 
-function outputText(data) {
-  for (const item of data.output ?? []) {
-    for (const part of item.content ?? []) {
-      if (part.type === "output_text") return part.text;
-    }
+// Prompts about spelling ("containing “age”", "ending in -ism", "a country with \"in\" in
+// its name", "whose name contains J, K, or V", "6 or fewer letters") are checked here
+// letter by letter, and a prompt with two such rules has to pass both, because
+// Claude offered Kiribati and Brunei for "in" and the graders let them through. Of the
+// 13,300 listed answers on the 125 such sheets studied, all pass but one the game got wrong.
+const QUOTE = `["'\u201c\u201d\u2018\u2019]`;
+const plain = (s) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+export function letterRule(prompt) {
+  const q = (re) => new RegExp(re.source.replace(/Q/g, QUOTE), "i").exec(prompt);
+  const letters = (name) => plain(name).replace(/[^a-z]/g, "");
+  const rules = [];
+  let m;
+  if ((m = q(/(?:containing|contains|with|has|having) (Q\w+Q(?:,? (?:or|and) Q\w+Q)*)(?: in (?:it|its name))?/))) {
+    const parts = m[1].match(new RegExp(`${QUOTE}(\\w+)${QUOTE}`, "g")).map((part) => plain(part.slice(1, -1)));
+    const every = / and /.test(m[1]);
+    rules.push((name) => parts[every ? "every" : "some"]((part) => plain(name).includes(part)));
   }
-  return "{}";
+  if ((m = q(/(?:ending|ends) (?:in|with) Q-?(\w+)Q/))) {
+    const end = plain(m[1]);
+    rules.push((name) => plain(name).endsWith(end));
+  }
+  if ((m = q(/(?:starting|starts|beginning|begins) with Q(\w+)Q/))) {
+    const start = plain(m[1]);
+    rules.push((name) => plain(name).startsWith(start));
+  }
+  if ((m = /\b(first|second|third|fourth|fifth|last) letter is (?:an? )?Q?([A-Za-z])Q?\b/.exec(prompt.replace(new RegExp(QUOTE, "g"), "")))) {
+    const at = { first: 0, second: 1, third: 2, fourth: 3, fifth: 4 }[m[1]];
+    const letter = m[2].toLowerCase();
+    rules.push((name) => (at === undefined ? letters(name).at(-1) : letters(name)[at]) === letter);
+  }
+  // "contains J, K, or V", "with the letter B in its name", "has the letters Q and Z"
+  const listed = "([A-Z](?:(?:,? (?:or|and) |, )[A-Z])*)\\b";
+  if ((m = new RegExp(`(?:contains?|containing|with|has|having) the letters? ${listed}`).exec(prompt) ?? new RegExp(`contains? ${listed.replace("*", "+")}`).exec(prompt))) {
+    const wanted = m[1].match(/[A-Z]/g).map((l) => l.toLowerCase());
+    const every = / and /.test(m[1]);
+    rules.push((name) => wanted[every ? "every" : "some"]((l) => plain(name).includes(l)));
+  }
+  // "6 or fewer letters", "7 or more letters", "(5+ letters)", "a 7+ letter word"
+  if ((m = /\b(\d+) or (fewer|less|more) letters\b/.exec(prompt))) {
+    const n = Number(m[1]);
+    rules.push(m[2] === "more" ? (name) => letters(name).length >= n : (name) => letters(name).length <= n);
+  }
+  if ((m = /\b(\d+)\+[ -]letters?\b/.exec(prompt))) {
+    const least = Number(m[1]);
+    rules.push((name) => letters(name).length >= least);
+  }
+  return rules.length ? (name) => rules.every((rule) => rule(name)) : null;
 }
 
-async function ask(prompt, openaiKey, fetchFn) {
-  const res = await fetchFn("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${openaiKey}` },
-    body: JSON.stringify({
-      model: "gpt-6-luna",
-      input: buildQuery(prompt),
-      reasoning: { effort: "none" },
-      text: { format: { type: "json_schema", name: "answers", strict: true, schema: SCHEMA } },
-    }),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
+// Compares names loosely, so "São Tomé" and "sao tome" count as the same answer.
+const sameName = (name) => name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+// How many new names arrive before the list on screen updates while Claude writes.
+const PARTIAL_STEP = 3;
+
+// Listing names needs no reasoning, so thinking stays off to keep the list fast.
+// With onPartial, the reply streams in and onPartial sees the names so far, so
+// the panel can show answers before the whole list and its ranking are done.
+async function ask(prompt, apiKey, fetchFn, query, { exclude = [], job, onPartial } = {}) {
+  const used = new Set(exclude.map(sameName));
+  const rule = letterRule(prompt);
+  const fresh = (text) => parseAnswers(text || "{}").filter((name) => !used.has(sameName(name)) && (!rule || rule(name)));
+  const client = createClient(apiKey, fetchFn, job);
+  const request = {
+    model: MODEL,
+    max_tokens: 16000,
+    thinking: NO_THINKING,
+    output_config: { effort: "low", format: { type: "json_schema", schema: SCHEMA } },
+    messages: [{ role: "user", content: query(prompt, exclude) }],
+  };
+  if (!onPartial) return fresh(replyText(await client.messages.create(request, { timeout: TIMEOUT_MS })));
+  const stream = client.messages.stream(request, { timeout: TIMEOUT_MS });
+  let shown = 0;
+  stream.on("text", (_delta, snapshot) => {
+    const names = fresh(snapshot);
+    if (names.length >= shown + PARTIAL_STEP) {
+      shown = names.length;
+      onPartial(names);
+    }
   });
-  if (!res.ok) throw new Error(`Luna returned ${res.status}`);
-  return parseAnswers(outputText(await res.json()));
+  return fresh(replyText(await stream.finalMessage()));
 }
 
-// An empty reply gets one retry.
-export async function getCandidates(prompt, openaiKey, fetchFn = fetch) {
-  const first = await ask(prompt, openaiKey, fetchFn);
-  return first.length ? first : ask(prompt, openaiKey, fetchFn);
+// A prompt with a short, closed list, such as the actors who have played Bond, leaves
+// few obscure answers, and the ones Claude finds are often wrong. Safe answers fill the
+// list out, and grading still puts the rarest of them first.
+const MIN_CANDIDATES = 10;
+
+// An empty reply gets one retry. Answers in exclude are never returned. The job sets
+// the requests' place in the queue.
+export async function getCandidates(prompt, apiKey, fetchFn = fetch, query = buildQuery, options = {}) {
+  let found = await ask(prompt, apiKey, fetchFn, query, options);
+  if (!found.length) found = await ask(prompt, apiKey, fetchFn, query, options);
+  if (found.length >= MIN_CANDIDATES || query === buildSafeQuery) return found;
+  const onPartial = options.onPartial && ((names) => options.onPartial(parseAnswers({ answers: [...found, ...names] })));
+  try {
+    return parseAnswers({ answers: [...found, ...(await ask(prompt, apiKey, fetchFn, buildSafeQuery, { ...options, onPartial }))] });
+  } catch (err) {
+    if (found.length) return found;
+    throw err;
+  }
 }

@@ -3,8 +3,12 @@
   "name": "Krillion Helper",
   "version": "0.5.0",
   "description": "Suggests obscure answers for Krillion and keeps a book of the answers revealed after your dives.",
-  "permissions": ["storage"],
-  "host_permissions": ["https://api.openai.com/*"],
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://api.anthropic.com/*"
+  ],
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -19,19 +23,34 @@
       "32": "icons/icon32.png"
     }
   },
-  "background": { "service_worker": "background.js", "type": "module" },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
   "options_page": "options.html",
   "content_scripts": [
     {
-      "matches": ["https://krillion.io/*"],
-      "js": ["hook.js"],
+      "matches": [
+        "https://krillion.io/*",
+        "https://playdaily.org/*"
+      ],
+      "js": [
+        "hook.js"
+      ],
       "world": "MAIN",
       "run_at": "document_start"
     },
     {
-      "matches": ["https://krillion.io/*"],
-      "js": ["content.js", "party-core.js", "party.js"],
-      "css": ["overlay.css"],
+      "matches": [
+        "https://krillion.io/*",
+        "https://playdaily.org/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "overlay.css"
+      ],
       "run_at": "document_idle"
     }
   ]

@@ -126,6 +126,10 @@
   margin: 0;
   padding: 0;
   list-style: none;
+  max-height: 330px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--kh-steel) var(--kh-ink);
 }
 #krillion-helper .kh-list li {
   margin: 0;

@@ -6,15 +6,16 @@ A personal Chrome extension that suggests obscure answers while you play [Krilli
 
 1. Open `chrome://extensions` and turn on Developer mode.
 2. Click **Load unpacked** and choose the `extension` folder.
-3. Open the extension's **Details**, then **Extension options**, and paste your OpenAI key.
+3. Open the extension's **Details**, then **Extension options**, and paste your Anthropic API key.
 
 ## How it works
 
-- **Suggestions:** when a prompt appears, GPT-6 Luna generates up to 40 obscure answers and the Decisions API ranks them by obscurity times the squared chance a reference list includes them. It also removes answers it's confident don't fit the prompt. The panel shows the top six, and when one is rejected the next moves up. Click one or press Alt + its number to fill the answer box, then press Enter yourself.
+- **Suggestions:** when a prompt appears, Claude Sonnet 5.5, with thinking off for speed, writes up to 30 obscure answers, following guidelines learned from the game's answer sheets (headword names, dictionary-only words for word prompts, no famous "obscure" picks), then grades them in parallel batches of ten. They're ranked by obscurity squared times the chance a reference list includes them, and answers it's confident don't fit the prompt are removed. Grading starts while Claude is still writing, and the ranked list appears within eight seconds. Anything not graded by then is left out. Once a dive starts, the other prompts are prepared in the background, behind the one on screen. The panel shows the top six, and when one is rejected the next moves up. Click one or press its number key to fill the answer box (a number typed after other text in the box types normally), then press Enter yourself.
 - **Answer book:** when you finish a dive, the game shows that dive's answers. The extension saves the top answer and some Deep Cuts for each prompt and shows them first if the prompt comes up again.
-- **Where it runs:** Unlimited, Archive and themed packs. On the Daily Dive, suggestions stay off until you turn them on from the panel. In Puffer Party, it only runs in private rooms, for friends who know about it. Rated, Quick Play and public rooms stay off.
-- **Toolbar popup:** shows your dive pace on a water column, how many answers landed in each tier, and a switch for the Daily Dive.
-- **Puffer Party (private rooms):** suggests answers for the current category and removes anything already accepted or missed by anyone in the room. It reads the game's room messages but never sends anything or submits for you.
+- **Known answers:** the extension remembers, per question, the answers it sees during play: tiers for accepted answers, and which ones were rejected. If a question comes up again, known answers show their tier and known misses are left out. This only uses what the game already shows you, and it never looks up answer lists.
+- **Where it runs:** Unlimited, Archive and themed packs. On the Daily Dive, suggestions stay off until you turn them on from the panel.
+- **playdaily.org:** dives at playdaily.org/krillion, Classic and Endless, also get suggestions, from a deeper answer request. Its Krillocity daily race, where you type as many answers as you can in 30 seconds, gets the same ranked list, and each answer you use leaves it so the next is ready. It keeps its own saved answers, separate from krillion.io, and doesn't count toward the toolbar popup. Only solo dives and the solo daily race get suggestions.
+- **Toolbar popup:** shows your dive pace on a water column, how many answers landed in each tier and a switch for the Daily Dive.
 
 ## What the game does
 
@@ -26,10 +27,69 @@ Learned by playing Unlimited dive 1:
 - `GET /api/unlimited/<n>/reveal` runs after a dive and returns every accepted answer with its tier.
 - Each prompt in that dive had exactly one `krillion` answer, chosen by hand with a fun fact attached.
 
+Learned from the reveal of one finished Unlimited dive (7 prompts, 6,337 answers), so treat these as a small sample:
+
+- Deep Cut is the default for a listed answer that isn't well known: 73% of answers, against Rare 16%, Schooler 10%, Plankton 1%. A uniformly random listed answer would average about 75 points.
+- Long, open lists are mostly Deep Cut (wine 94%). Short, closed lists aren't (coastal countries 6%, Rare 47%), so tier is relative to the list.
+- There is exactly one One in a Krillion per prompt, 1 answer in 82 to 2,465. Each comes with a one-line fun fact and is often only moderately obscure, so it can't be predicted from rarity. Fun facts appear on 18 answers in total, so a fact doesn't guarantee a gem.
+
+Learned from Daily Dive #109 (7 prompts, 28,774 answers) and its pick counts, one day's sample:
+
+- Tier doesn't follow pick counts. Floppy disk had about 67,000 picks and was Deep Cut, while Tia Mowry had 1 and was Rare. It seems to reflect how obvious an answer is for that prompt, not how famous it is.
+- Every prompt had one One in a Krillion, and each was picked by 0.25% to 0.65% of players. That's more than 97% to 100% of that prompt's Deep Cuts, and they ranked 20th to 97th most picked. Gems aren't the rarest answers.
+- 62% of listed answers had no picks at all, and all of them were Deep Cut.
+- Fun facts appeared only on gems. Several facts show the answer qualifies in a surprising way, such as Bone music (bootlegs cut onto X-rays) and Golf hole cutter.
+- Misspellings and old names return `correction` and need a second Enter (Olinguitto to Olinguito, Swaziland to Eswatini). A shortened name can pass straight through (Karakum to Karakum Desert).
+- Too Clever didn't appear in this dive. The only example so far is Human for "Name a species of great ape" in Unlimited dive 1, so it may mark an answer that's technically right but a gotcha.
+
+Learned from Geography pack 1, which the game labels as beta with possible scoring issues:
+
+- Lists are short and closed (9 to 69 answers), so far fewer are Deep Cut.
+- A prompt can have zero, one or two gems, and fun facts also appear on other tiers. A gem can be a well-known answer with a hidden qualifier, such as Croatia (stars in the crown above its checkerboard).
+
+Learned from the FAQ and from 1,300 of Claude's answers that were on the real lists (Daily #109, Unlimited 1 and the first Movies, Sports, Geography and Lexicon dives):
+
+- The FAQ says some prompts are tiered mechanically from a database of how often a word or name turns up in what people read and write, and the rest with a model plus a manual pass. That shows in the lists. On word, name and place prompts, a rarer tier almost always means a rarer word (the order agrees with the `wordfreq` library 80% to 90% of the time), while on film, team and sport prompts it agrees only about half the time.
+- Among listed answers, Claude's obscurity score predicts the tier well: answers it rates under 1 average 29 points, and answers it rates near 3 average 84. Word frequency predicts it less well (52 to 81 points), and it says nothing about whether an answer is listed at all.
+- Since a rejected answer only costs time, obscurity now counts for more than the chance of being listed. Squaring it turned many Rare picks into Deep Cuts in replays, with about half a rejection more per prompt.
+- The FAQ says the One in a Krillion is picked for fun factor past a certain depth, and should be something a few players actually get. Asking Claude to pick the gem among its own answers, with 12 real gems and their fun facts as examples, found it 8 times in 28, but putting that pick first gained under a point a prompt, so it isn't used.
+- Too Clever, per the FAQ, is "the go-to obscure pick that isn't actually that obscure."
+
+Learned from every answer sheet the API hands out without an unlock, 252 prompts and 98,000 answers (`node scripts/fetch-sheets.mjs` saves them to `eval/`): all 30 Words & Language dives, the first dive of the other packs, Unlimited 1, and the day's Daily sheet, which `/api/reveal?date=<today>` returns before you play while past days are "not publicly available". The extension never reads these during play:
+
+- Word prompts are tiered by corpus frequency, as the FAQ says. Over 30 word dives the tier order matched the `wordfreq` library 87% of the time. Plankton words sit around a Zipf frequency of 3.5 (a few times per million words), Schooler around 2.8, Rare around 1.5, and 68% of Deep Cuts and 78% of gems don't appear in the corpus at all. So on a word prompt the target is a dictionary word that modern writing never uses.
+- Word prompts get two gems each, both near-zero frequency ("hospitage", "froughy"), so there fun factor is just depth. Elsewhere there's one gem, and it's often not the rarest answer: Iraq for a country with a coastline, Croatia for a flag with a star, Military patrol for a Winter Olympic sport, each with a fun fact about a hidden qualifier or a quirk of history.
+- List size sets the tiers. Open categories run into the thousands (South American animals 19,412) and are 95% to 99% Deep Cut, so there nearly any documented uncommon answer scores 85. Short closed lists (6 to 150) are mostly Schooler and Rare, with Deep Cuts for defunct or little-known members.
+- A quarter of Claude's rejected answers were on the list under a shorter name: "Bootleg" not "Bootleg recording", "Acetate" not "Acetate disc", "Split" not "Split album", and the gem "Eephus" not "Eephus pitch". The autocorrect didn't bridge those. Only 3% were spelling slips, and the rest were absent.
+- Listed names almost never start with "The" (0.5%) or carry parentheses, but 7% keep their diacritics.
+- Putting those lessons into the answer prompt mainly helped word prompts: on four Words & Language dives, suggestions found on the list went from 37% to 45%, rejections before a hit fell from 1.6 to 0.4 and points rose from 55 to 62 a prompt. On the other dives it scored the same as before, about 80 points a prompt. A longer version that also pushed defunct or technically-qualifying members of short lists raised rejections and was dropped.
+- Spelling prompts ("containing “age”", "a country with \"in\" in its name") are the one place Claude's checks fail outright: it offered Kiribati and Brunei for "in" and the graders passed them. The extension now checks those prompts letter by letter itself. Across the 125 such sheets, every listed answer passes the check except Czech Republic, which the game lists for "contains J, K, or V".
+- Today's Daily (#117) scored 71 to 76 points a prompt over three runs. The losses were the celebrated "obscure" picks on huge lists: Aardwolf, Numbat and Aye-aye for an insect eater (40,000 Deep Cuts available), Sartorius for a body part, acclaimed podcasts. Claude rates them about as obscure as true Deep Cuts but more surely listed. Mixing the `wordfreq` database into the ranking didn't fix it (76.5 to 72 to 77 on 56 replays), nor did asking Claude for text frequency instead of obscurity, nor telling it to avoid celebrated picks. Only known Deep Cuts and gems outrank fresh suggestions, and the ranking stays obscurity squared times listed.
+- Daily #118 scored 78 to 81 points a prompt over three runs, Deep Cuts on five of seven prompts every time. The misses were the song prompt, where Claude's first picks were Rare album tracks, and "a country whose second letter is O", where it offered Mauritius and Djibouti; letter-position prompts are now checked locally too. Asking the grader for a fourth score, how "celebrated" an obscure pick is, and demoting by it moved the score by +3.6, −1.1, 0.0 and +0.4 points over four paired runs of 35 prompts, so it isn't used.
+- Daily #119 scored 66 to 73 points a prompt over three runs, the worst so far, for two reasons. For "a country where at least 50% of people speak English" Claude listed British territories (Anguilla, Montserrat, Pitcairn), none of which the sheet counts, so the prompt now says a country is a sovereign state. For "a named object in space bigger than Earth's Moon" it listed thirty dwarf planets and small moons, every one failed the fit check, and the panel fell back to showing them anyway. Now, when every answer fails the fit check, the extension asks once more with the misses shown and the instruction to re-read the prompt's conditions, and the prompt asks for answers from several kinds of thing. With those two changes the prompt scored 78.2 and 78.0 points against 74.8 and 74.6 over 42 prompts from six dives. The ranking formula was rechecked on 84 graded runs and obscurity squared times listed still wins at one, two and three tries.
+- Daily #120 scored 66 to 69 points a prompt over three runs. Six prompts landed Deep Cuts or Rares; "a type of injury (like a sprain, not a sprained ankle)" scored 0 every time, because all thirty of Claude's answers were eponymous, site-specific injuries (Monteggia fracture, Gamekeeper's thumb), the grader rated them as fitting, and the sheet holds none of them: its 245 answers are general kinds (avulsion, barotrauma, comminuted fracture). Four wordings about following the prompt's note or matching its example's shape left the lists unchanged. A rule that a prompt asking for a type or kind wants general terms, never eponyms or cases named for one person, place or body part, raised listed candidates from 2 to 5 of 30 to 8 to 13 and the day's score to 68 and 78, with the 42-prompt set at 78.8 against 78.2 and 78.0; it's kept. Eponyms still rank first when listed, since the grader scores them obscure and fitting, and telling the grader that an answer shaped like the prompt's non-example doesn't fit changed nothing on that prompt. The chocolate misses were toffee bars (Skor, Heath, Caramac) read as caramel.
+- Where the points go, on 98 runs of 49 prompts: the first accepted pick was a Deep Cut 67 times and a Rare 27 times, and the list nearly always held a Deep Cut (best answer available averaged 87 points against 78 scored). So the loss is the ranking mistaking a Rare for a Deep Cut, not the list. Five ideas were measured on those runs. A slower pass that first writes out what the prompt requires, alone or with a second long-tail list, scored 75.7 to 78.0 against 77.5 and 78.0. Checking names against Wikipedia: answers with an exact article title were on the sheet 79% of the time and those with no article 45%, but demoting the latter added 0.2 points, and swapping a redirect for its target mostly produced common names in low tiers. Wikipedia pageviews separate Deep Cuts from Rares within a prompt 74% of the time, the grader's own obscurity score 89%, and adding pageviews helped only at one hand-picked threshold. Exponents that change with the sheet's size moved the score by under a point even given the true size. Grading the same list three times and averaging did help: 79.2 points against 78.0 for one grading and 78.6 for two, so dives now do that.
+- Daily #124 scored 90, 79 and 84 points a prompt, finding the gem (Erbium) on the element prompt every run. Two leaks showed. Claude offered Eswatini and Comoros for "a country with the letter B in its name" and Holmium for "6 or fewer letters", so a named letter and a letter count are now checked locally, and a prompt with two spelling rules must pass both; across the 136 saved sheets with a rule, 15,331 of 15,332 listed answers pass. And one prompt timed out in two of three runs: three gradings tripled the queue, and a request's time limit includes its wait there. The limits are now long enough to cover the queue, and enough places are kept free for all nine of the on-screen prompt's grading requests to start at once. After both fixes two more runs had no timeouts and 0 and 0.14 rejections a prompt, down from 0.3 to 0.7.
+- Too Clever appeared three times in 98,000 answers: Human for a great ape, and Antidisestablishmentarianism twice.
+
+Learned from six Classic dives on playdaily.org, a separate game with different grading:
+
+- Playing the top suggestions, the deeper ranking scored 320 and 484 out of 700, and the krillion.io ranking scored 356 and 352. Those were different prompts in each dive, so this is a small sample.
+
+- Tiers are worth 4, 8, 16, 32, 64 and 100 points, so obscurity pays much more than on krillion.io.
+- Played through its API with Claude (35 prompts a side), the krillion.io ranking by obscurity squared scored 73 points a prompt and a ranking built for the doubled points scored 64, mostly by turning Schoolers into Deep Cuts. Almost every accepted answer was off the short list shown afterwards, so the site grades unlisted answers live.
+- A prompt can have several One in a Krillion answers, and the lists after a dive are short (25 to about 60 answers).
+- Answers not on those lists can still be accepted: Bublik scored Deep Cut for "a food that has a hole in it" but wasn't on the list shown.
+- Too Clever here is the answer that feels clever but many people give: Pomegranate for "a thing that contains seeds", Bahrain for "a country in the Middle East".
+- Close spellings and near names are accepted straight away (Umamii to Umami, Crochet needle to Crochet Hook), with no second Enter.
+- `POST /api/krillion/deal` gives all 7 prompts, `POST /api/krillion/answer` grades one, and `GET /api/krillion/answers` returns a prompt's list after the dive.
+
 ## Development
 
 ```bash
 npm test
 ```
 
-With `OPENAI_API_KEY` set, `node scripts/eval-pipeline.mjs <tiers.json>` scores the suggestion code against a file of known tier lists.
+The extension loads the Anthropic SDK from `extension/vendor/anthropic-sdk.js`. After changing the SDK version in `package.json`, rebuild it with `npm run build:sdk`.
+
+With `ANTHROPIC_API_KEY` set, `node scripts/eval-pipeline.mjs <tiers.json>` scores the suggestion code against a file of known tier lists.

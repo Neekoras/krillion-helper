@@ -10,8 +10,11 @@
     plankton: "Plankton",
   };
 
-  // The panel shows the best few. A rejected answer leaves and the next one moves up.
-  const VISIBLE = 6;
+  // The list scrolls, so every suggestion is in it, best first with the Deep Cuts below the
+  // One in a Krillions. The first nine have number keys. A rejected answer leaves and the next moves up.
+  const KEYED = 9;
+  const LISTED = 40;
+  const SCREEN = 6;
 
   let currentPrompt = null;
   let suggestions = [];
@@ -20,6 +23,7 @@
   let collapsed = false;
   let lastResult = null;
   let rejectedCount = 0;
+  let upcoming = [];
 
   const panel = document.createElement("aside");
   panel.id = "krillion-helper";
@@ -27,7 +31,19 @@
   panel.hidden = true;
   document.documentElement.append(panel);
 
-  const isDaily = () => location.pathname === "/";
+  const PLAYDAILY = location.hostname === "playdaily.org";
+  const isDaily = () => !PLAYDAILY && location.pathname === "/";
+  // Krillocity is playdaily.org's rapid-fire race: every accepted answer counts, so a
+  // used suggestion leaves the list whether or not it was accepted.
+  const inRace = () => PLAYDAILY && /^\/krillocity\/?$/.test(location.pathname);
+
+  // On playdaily.org only solo dives count, and in Krillocity only the solo daily race.
+  function inDive() {
+    if (!PLAYDAILY) return document.querySelector(".ds-score-pod") && !document.querySelector(".ds-begin-btn");
+    if (inRace()) return document.querySelector(".kb-stage .kr-prompt") && document.querySelectorAll(".kb-race-tag").length <= 1;
+    if (!/^\/krillion\/?$/.test(location.pathname)) return false;
+    return document.querySelector(".kr-stage .kr-prompt") && !document.querySelector(".kr-stage-multi, .kd-stage");
+  }
 
   chrome.storage.local.get(["dailyEnabled", "panelCollapsed"]).then((s) => {
     dailyEnabled = Boolean(s.dailyEnabled);
@@ -70,7 +86,7 @@
     box.setAttribute("role", "status");
     box.append(el("span", "", status.text));
     if (status.needsKey) {
-      const button = el("button", "kh-action", "Add OpenAI key");
+      const button = el("button", "kh-action", "Add Anthropic key");
       button.type = "button";
       button.addEventListener("click", () => chrome.runtime.sendMessage({ type: "openOptions" }));
       box.append(button);
@@ -93,7 +109,7 @@
     const button = el("button", "kh-item");
     button.type = "button";
     if (s.tier) button.dataset.tier = s.tier;
-    button.append(el("kbd", "kh-key", String(index + 1)));
+    button.append(el("kbd", "kh-key", index < KEYED ? String(index + 1) : "·"));
     const text = el("span", "kh-text");
     text.append(el("span", "kh-answer", s.name));
     if (s.tier) text.append(el("span", "kh-tag", TIER_LABEL[s.tier] ?? s.tier));
@@ -104,6 +120,7 @@
   }
 
   function render() {
+    const scrolled = panel.querySelector(".kh-list")?.scrollTop ?? 0;
     panel.replaceChildren(renderHeader());
     panel.classList.toggle("kh-collapsed", collapsed);
     if (collapsed) return;
@@ -115,12 +132,12 @@
     if (status) panel.append(renderStatus());
     if (suggestions.length) {
       const list = el("ol", "kh-list");
-      suggestions.slice(0, VISIBLE).forEach((s, i) => list.append(renderItem(s, i)));
+      suggestions.slice(0, LISTED).forEach((s, i) => list.append(renderItem(s, i)));
       panel.append(list);
-      const left = suggestions.length - Math.min(suggestions.length, VISIBLE);
+      list.scrollTop = scrolled;
       const rejected = rejectedCount ? `${rejectedCount} not accepted. ` : "";
-      const more = left ? `${left} more ready. ` : "";
-      panel.append(el("p", "kh-hint", `${rejected}${more}Alt + number fills it. Enter dives.`));
+      const more = suggestions.length > SCREEN ? "Scroll for more. " : "";
+      panel.append(el("p", "kh-hint", `${rejected}${more}Press a number to fill it. Enter ${inRace() ? "swims" : "dives"}.`));
     }
     if (lastResult) {
       const result = el("p", "kh-result");
@@ -132,7 +149,7 @@
   }
 
   function fill(text) {
-    const input = document.querySelector(".ds-input");
+    const input = document.querySelector(PLAYDAILY ? ".kr-input" : ".ds-input");
     if (!input) return;
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
     setter.call(input, text);
@@ -147,9 +164,16 @@
     rejectedCount = 0;
     status = { text: "Sounding for answers", searching: true };
     render();
+    const asked = chrome.runtime.sendMessage({ type: "suggest", prompt });
+    // The first prompt of a dive starts suggestions for the rest of it, after its own.
+    if (upcoming.length) {
+      const rest = upcoming.filter((p) => p.trim() !== prompt);
+      upcoming = [];
+      chrome.runtime.sendMessage({ type: "prefetch", prompts: rest }).catch(() => {});
+    }
     let reply;
     try {
-      reply = await chrome.runtime.sendMessage({ type: "suggest", prompt });
+      reply = await asked;
     } catch {
       // Reloading the extension disconnects tabs that were already open.
       status = { text: "Lost connection to the extension. Refresh this page." };
@@ -169,24 +193,34 @@
   }
 
   function poll() {
-    const inDive = document.querySelector(".ds-score-pod") && !document.querySelector(".ds-begin-btn");
-    if (!inDive || location.pathname.startsWith("/party")) {
+    if (!inDive()) {
       panel.hidden = true;
       return;
     }
     panel.hidden = false;
     if (isDaily() && !dailyEnabled) return;
-    const prompt = document.querySelector(".ds-card .prompt")?.textContent.trim();
+    const prompt = document.querySelector(PLAYDAILY ? ".kr-prompt" : ".ds-card .prompt")?.textContent.trim();
     if (prompt && prompt !== currentPrompt) onPrompt(prompt);
   }
 
-  // e.code stays Digit1 on a Mac, where Alt+1 would otherwise type a symbol.
+  // A number key picks a suggestion, unless you're typing: in the answer box once it
+  // has text, so answers like "Cars 2" still work, or in any other field.
+  function suggestionNumber(event, box) {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null;
+    const match = /^(?:Digit|Numpad)([1-9])$/.exec(event.code);
+    if (!match) return null;
+    const target = event.target;
+    const field = target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
+    if (field && (target !== box || box.value)) return null;
+    return Number(match[1]);
+  }
+
   document.addEventListener(
     "keydown",
     (event) => {
-      if (!event.altKey || panel.hidden || collapsed) return;
-      const match = /^Digit([1-9])$/.exec(event.code);
-      const suggestion = match && suggestions.slice(0, VISIBLE)[Number(match[1]) - 1];
+      if (panel.hidden || collapsed) return;
+      const number = suggestionNumber(event, document.querySelector(PLAYDAILY ? ".kr-input" : ".ds-input"));
+      const suggestion = number && suggestions.slice(0, KEYED)[number - 1];
       if (!suggestion) return;
       event.preventDefault();
       event.stopPropagation();
@@ -195,10 +229,16 @@
     true,
   );
 
+  function rememberSeen(name, tier) {
+    if (currentPrompt) chrome.runtime.sendMessage({ type: "seen", items: [{ prompt: currentPrompt, name, tier }] });
+  }
+
   window.addEventListener("message", (event) => {
     if (event.source !== window || event.data?.source !== "krillion-helper") return;
     const { type, payload } = event.data;
-    if (type === "reveal") {
+    if (type === "prompts") {
+      upcoming = payload.prompts;
+    } else if (type === "reveal") {
       chrome.runtime.sendMessage({ type: "reveal", rounds: payload.rounds });
     } else if (type === "submit") {
       if (payload.accepted) {
@@ -211,12 +251,18 @@
           score: payload.score,
           fromHelper: suggestions.some((s) => s.name === payload.answer || s.name === payload.guess),
         });
+        rememberSeen(payload.answer, payload.tier);
       } else if (!payload.correction) {
-        const guess = String(payload.guess).trim().toLowerCase();
-        const remaining = suggestions.filter((s) => s.name.toLowerCase() !== guess);
+        rememberSeen(payload.guess, null);
+      }
+      // A rejected answer leaves the list. In a race an accepted one does too, since
+      // the next answer is wanted straight away.
+      if (!payload.correction && (!payload.accepted || inRace())) {
+        const used = [payload.guess, payload.answer].filter(Boolean).map((a) => String(a).trim().toLowerCase());
+        const remaining = suggestions.filter((s) => !used.includes(s.name.toLowerCase()));
         if (remaining.length < suggestions.length) {
           suggestions = remaining;
-          rejectedCount++;
+          if (!payload.accepted) rejectedCount++;
           if (!suggestions.length) status = { text: "Out of suggestions. Try your own answer." };
         }
       }
